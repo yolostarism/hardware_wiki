@@ -67,3 +67,22 @@ export async function updateDocument(id, content) {
     return { success: false, error: error.message };
   }
 }
+// 6. 重命名节点
+export async function renameNode(id, newName) {
+  try {
+    await sql`UPDATE directories SET name = ${newName} WHERE id = ${id};`;
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 7. 移动节点
+export async function moveNode(id, newParentId) {
+  try {
+    await sql`UPDATE directories SET parent_id = ${newParentId} WHERE id = ${id};`;
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
