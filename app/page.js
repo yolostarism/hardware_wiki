@@ -1,4 +1,5 @@
 'use client';
+export const dynamic = 'force-dynamic';
 import { useState, useEffect } from 'react';
 import { Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, Edit2, Save, Trash2, FilePlus, FolderPlus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
