@@ -1,22 +1,27 @@
 'use client';
 export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, Edit2, Save, Trash2, FilePlus, FolderPlus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import dynamic from 'next/dynamic';
+// 这里我们将 next/dynamic 换个名字导入，叫做 nextDynamic，彻底避开名字冲突！
+import nextDynamic from 'next/dynamic'; 
 import { getDirectories, getDocument, addNode, deleteNode, updateDocument } from './actions';
 
-const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
+// 这里使用换了名字的 nextDynamic
+const MDEditor = nextDynamic(
+  () => import('@uiw/react-md-editor').then((mod) => mod.default), 
+  { ssr: false }
+);
+
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 export default function Home() {
-  // === 登录拦截状态 ===
-  const [userRole, setUserRole] = useState(null); // 'admin', 'guest', 或 null(未登录)
+  const [userRole, setUserRole] = useState(null);
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   
-  // 以前的状态
   const [activeFileId, setActiveFileId] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [directories, setDirectories] = useState([]);
@@ -24,17 +29,12 @@ export default function Home() {
   const [activeTitle, setActiveTitle] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  // 1. 网页刚打开时，检查之前是否登录过
   useEffect(() => {
     const savedRole = localStorage.getItem('pzp_wiki_role');
-    if (savedRole) {
-      setUserRole(savedRole);
-    } else {
-      setIsLoading(false); // 如果没登录，直接取消加载状态，显示登录框
-    }
+    if (savedRole) setUserRole(savedRole);
+    else setIsLoading(false);
   }, []);
 
-  // 2. 只有在确认登录后，才去云端拉取你的私密目录
   useEffect(() => {
     if (userRole) {
       setIsLoading(true);
@@ -56,9 +56,8 @@ export default function Home() {
     }));
   };
 
-  // === 真实的登录验证逻辑 ===
   const handleLogin = (e) => {
-    e.preventDefault(); // 阻止表单默认提交刷新
+    e.preventDefault();
     if (loginUser === 'pzpadmin' && loginPass === 'p986960440105++') {
       setUserRole('admin');
       localStorage.setItem('pzp_wiki_role', 'admin');
@@ -70,18 +69,15 @@ export default function Home() {
     }
   };
 
-  // 退出登录
   const handleLogout = () => {
     setUserRole(null);
     localStorage.removeItem('pzp_wiki_role');
-    setDirectories([]); // 清空屏幕上的私密数据
+    setDirectories([]);
     setActiveFileId(null);
   };
 
-  // 一键判断当前是不是管理员
   const isAdmin = userRole === 'admin';
 
-  // --- 如果没登录，就渲染这个占据全屏的“登录大门” ---
   if (!userRole) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-100">
@@ -91,26 +87,15 @@ export default function Home() {
             <p className="text-gray-500 mt-2">个人硬件知识库</p>
           </div>
           <form onSubmit={handleLogin} className="flex flex-col gap-5">
-            <input 
-              type="text" placeholder="用户名" 
-              className="border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
-              value={loginUser} onChange={e => setLoginUser(e.target.value)} required
-            />
-            <input 
-              type="password" placeholder="密码" 
-              className="border border-gray-300 p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" 
-              value={loginPass} onChange={e => setLoginPass(e.target.value)} required
-            />
-            <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-md transition shadow-md mt-2">
-              进入知识库
-            </button>
+            <input type="text" placeholder="用户名" className="border border-gray-300 p-3 rounded-md" value={loginUser} onChange={e => setLoginUser(e.target.value)} required />
+            <input type="password" placeholder="密码" className="border border-gray-300 p-3 rounded-md" value={loginPass} onChange={e => setLoginPass(e.target.value)} required />
+            <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-md shadow-md mt-2">进入知识库</button>
           </form>
         </div>
       </div>
     );
   }
 
-  // --- 下面是登录成功后的核心系统代码 (无需修改) ---
   const handleItemClick = async (node) => {
     if (node.type === 'folder') {
       const toggleNode = (items) => items.map(item => {
@@ -205,7 +190,6 @@ export default function Home() {
             <input type="text" placeholder="搜索芯片..." className="pl-10 pr-4 py-2 border border-gray-300 rounded-md w-72 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" />
           </div>
           
-          {/* 右上角的状态显示和退出按钮 */}
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-500">
               当前身份：<span className={isAdmin ? 'text-blue-600 font-bold' : 'text-green-600 font-bold'}>{isAdmin ? '系统管理员' : '游客'}</span>
