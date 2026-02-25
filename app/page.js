@@ -7,7 +7,7 @@ import remarkGfm from 'remark-gfm';
 import dynamic from 'next/dynamic';
 import { getDirectories, getDocument, addNode, deleteNode, updateDocument } from './actions';
 
-const MDEditor = dynamic(() => import('@uiw/react-md-editor').then((mod) => mod.default), { ssr: false });
+const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 export default function Home() {
