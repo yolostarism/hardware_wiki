@@ -5,12 +5,18 @@ import { useState, useEffect } from 'react';
 import { 
   Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, 
   Edit2, Save, Trash2, FilePlus, FolderPlus, Edit, MoveRight,
-  Sun, Moon // 新增了太阳和月亮图标
+  Sun, Moon 
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import nextDynamic from 'next/dynamic'; 
 import { getDirectories, getDocument, addNode, deleteNode, updateDocument, renameNode, moveNode } from './actions';
+
+// === 新增：引入数学公式和 HTML 解析插件 ===
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
+import 'katex/dist/katex.min.css'; // 公式所需样式
 
 const MDEditor = nextDynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -28,16 +34,13 @@ export default function Home() {
   const [movingNode, setMovingNode] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   
-  // === 新增：暗色模式状态 ===
   const [theme, setTheme] = useState('light');
 
-  // 初始化：检查登录状态 & 暗色模式设置
   useEffect(() => {
     const savedRole = localStorage.getItem('pzp_wiki_role');
     if (savedRole) setUserRole(savedRole);
     else setIsLoading(false);
 
-    // 读取本地保存的暗黑模式，并应用到 html 标签
     const savedTheme = localStorage.getItem('pzp_wiki_theme');
     const initTheme = savedTheme === 'dark' ? 'dark' : 'light';
     setTheme(initTheme);
@@ -48,7 +51,6 @@ export default function Home() {
     if (userRole) loadTreeData();
   }, [userRole]);
 
-  // === 新增：切换暗色模式 ===
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
@@ -249,13 +251,11 @@ export default function Home() {
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-500 dark:text-gray-400 hidden sm:block">当前：<span className={isAdmin ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-green-600 dark:text-green-400 font-bold'}>{isAdmin ? '管理员' : '游客'}</span></span>
             
-            {/* 新增：暗黑模式切换按钮 */}
             <button onClick={toggleTheme} className="flex gap-2 text-sm bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 px-3 py-2 rounded-md hover:bg-gray-200 dark:hover:bg-zinc-700 transition" title="切换显示模式">
               {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
               <span className="hidden md:inline">{theme === 'dark' ? '浅色' : '暗色'}</span>
             </button>
             
-            {/* 退出登录按钮 */}
             <button onClick={handleLogout} className="flex gap-2 text-sm bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-md hover:bg-gray-200 dark:hover:bg-zinc-700 transition"><LogOut size={16} />退出</button>
           </div>
         </div>
@@ -272,14 +272,27 @@ export default function Home() {
                 {isAdmin && (<button onClick={() => isEditing ? handleSave() : setIsEditing(true)} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm transition ${isEditing ? 'bg-green-600 text-white dark:bg-green-700' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>{isEditing ? <><Save size={16} /> 保存</> : <><Edit2 size={16} /> 编辑</>}</button>)}
               </div>
               {isEditing ? (
-                // 给编辑器传递 color-mode 以便自动适应暗色
                 <div data-color-mode={theme} className="h-[calc(100vh-200px)]" onPaste={handlePaste} onDrop={handleDrop}>
-                  <MDEditor value={markdownContent || ' '} onChange={setMarkdownContent} height="100%" />
+                  <MDEditor 
+                    value={markdownContent || ' '} 
+                    onChange={setMarkdownContent} 
+                    height="100%" 
+                    previewOptions={{
+                      // === 这里的 rehypePlugins 加上了 rehypeRaw ===
+                      remarkPlugins: [remarkGfm, remarkMath],
+                      rehypePlugins: [rehypeRaw, rehypeKatex]
+                    }}
+                  />
                 </div>
               ) : (
-                // 重点：增加 dark:prose-invert 让阅读模式的字体变为白色系
                 <div className="prose prose-blue dark:prose-invert max-w-none pb-20">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdownContent || ' '}</ReactMarkdown>
+                  <ReactMarkdown 
+                    // === 这里的 rehypePlugins 加上了 rehypeRaw ===
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeRaw, rehypeKatex]}
+                  >
+                    {markdownContent || ' '}
+                  </ReactMarkdown>
                 </div>
               )}
             </>

@@ -21,3 +21,28 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* =========================================
+   修复 prose 插件带来的行内代码（反引号）样式问题
+   ========================================= */
+
+/* 1. 强制去掉 prose 插件在 code 前后自动生成的引号/反引号 */
+.prose code::before,
+.prose code::after {
+  content: none !important;
+}
+
+/* 2. 亮色模式：给行内代码加上背景色和高亮文字（注意：排除 pre 标签以免影响多行代码块） */
+.prose :not(pre) > code {
+  background-color: #f3f4f6; /* 浅灰色背景 */
+  color: #ef4444;            /* 红色文字（类似 GitHub 风格） */
+  padding: 0.15rem 0.3rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+
+/* 3. 暗色模式：给行内代码调整适应暗黑背景的颜色 */
+.dark .prose :not(pre) > code {
+  background-color: #27272a; /* 深灰背景，适应你的 zinc 颜色 */
+  color: #fca5a5;            /* 浅红/粉色文字，保证对比度 */
+}
