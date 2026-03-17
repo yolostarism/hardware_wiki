@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect,useMemo } from 'react';
 import { 
   Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, 
   Edit2, Save, Trash2, FilePlus, FolderPlus, Edit, MoveRight,
@@ -33,6 +33,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [movingNode, setMovingNode] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   
   const [theme, setTheme] = useState('light');
 
@@ -50,6 +51,36 @@ export default function Home() {
   useEffect(() => {
     if (userRole) loadTreeData();
   }, [userRole]);
+
+  // 过滤目录树的逻辑
+  const filterTree = (nodes, query) => {
+    if (!query) return nodes;
+
+    return nodes.map(node => {
+      // 递归过滤子节点
+      const filteredChildren = node.children ? filterTree(node.children, query) : [];
+
+      // 检查当前节点名称是否包含关键词
+      const isMatch = node.name.toLowerCase().includes(query.toLowerCase());
+
+      // 如果当前节点匹配，或者子节点有匹配项，则保留该节点
+      if (isMatch || filteredChildren.length > 0) {
+        return {
+          ...node,
+          children: filteredChildren,
+          // 搜索时强制展开匹配的文件夹
+          isExpanded: true
+        };
+      }
+      return null;
+    }).filter(Boolean); // 移除不匹配的 null 节点
+  };
+
+  // 获取过滤后的目录
+  const filteredDirectories = useMemo(() =>
+    filterTree(directories, searchQuery),
+    [directories, searchQuery]
+  );
 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
@@ -235,7 +266,7 @@ export default function Home() {
             </div>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto pr-2">{isLoading ? <p className="text-gray-400 text-sm">加载中...</p> : renderTree(directories)}</div>
+        <div className="flex-1 overflow-y-auto pr-2">{isLoading ? <p className="text-gray-400 text-sm">加载中...</p> : renderTree(filteredDirectories)}</div>
         {isAdmin && !movingNode && (<button onClick={() => handleAddNode('root', 'folder')} className="mt-4 flex flex-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600"><PlusCircle size={18} /><span>添加根目录</span></button>)}
       </div>
 
@@ -245,7 +276,15 @@ export default function Home() {
         <div className="h-16 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between px-6 bg-white dark:bg-zinc-900 shrink-0 transition-colors">
           <div className="relative">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-            <input type="text" placeholder="搜索芯片..." className="pl-10 pr-4 py-2 border dark:border-zinc-700 rounded-md text-sm bg-transparent focus:outline-none focus:border-blue-500" />
+            <input 
+              type="text" 
+              placeholder="搜索芯片..." 
+              className="pl-10 pr-4 py-2 border dark:border-zinc-700 rounded-md text-sm bg-transparent focus:outline-none focus:border-blue-500" 
+              // === 新增以下两行 ===
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+
           </div>
           
           <div className="flex items-center gap-4">
