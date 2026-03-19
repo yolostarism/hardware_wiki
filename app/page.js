@@ -96,9 +96,9 @@ export default function Home() {
     setIsLoading(false);
   };
 
-  const buildTree = (nodes, parentId) => {
+  const buildTree = (nodes, parentId, level = 0) => {
     return nodes.filter(node => node.parent_id === parentId).map(node => ({
-      ...node, isExpanded: true, children: buildTree(nodes, node.id)
+      ...node, isExpanded: level < 2, children: buildTree(nodes, node.id, level + 1)
     }));
   };
 
