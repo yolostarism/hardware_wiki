@@ -228,7 +228,7 @@ export default function Home() {
 
   const renderTree = (nodes, level = 0) => {
     return nodes.map((node) => (
-      <div key={node.id} style={{ paddingLeft: `${level * 16}px` }} className="mt-1">
+      <div key={node.id} style={{ paddingLeft: `${level * 8}px` }} className="mt-1">
         <div className={`flex items-center justify-between px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer text-sm group ${activeFileId === node.id ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'} ${movingNode?.id === node.id ? 'opacity-50' : ''}`}>
           <div className="flex items-center gap-2 overflow-hidden flex-1" onClick={() => handleItemClick(node)}>
             {node.type === 'folder' ? (node.isExpanded ? <FolderOpen size={16} className="text-blue-500 shrink-0" /> : <Folder size={16} className="text-gray-500 shrink-0" />) : (<FileText size={16} className={`${activeFileId === node.id ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'} shrink-0`} />)}
