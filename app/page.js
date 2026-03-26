@@ -308,9 +308,9 @@ export default function Home() {
         </div>
 
         {/* 文章阅读/编辑区 */}
-        <div className="flex-1 p-8 overflow-y-auto bg-white dark:bg-zinc-950 transition-colors">
+        <div className="flex-1 min-h-0 overflow-y-auto bg-white dark:bg-zinc-950 transition-colors">
           {!activeFileId ? (<div className="flex h-full items-center justify-center text-gray-400 dark:text-gray-600">👈 请在左侧选择文章</div>) : (
-            <>
+            <div className="p-8">
               <div className="flex justify-between items-start mb-6 border-b dark:border-zinc-800 pb-4">
                 <div>
                   <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{activeTitle}</h2>
@@ -319,22 +319,20 @@ export default function Home() {
                 {isAdmin && (<button onClick={() => isEditing ? handleSave() : setIsEditing(true)} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm transition ${isEditing ? 'bg-green-600 text-white dark:bg-green-700' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>{isEditing ? <><Save size={16} /> 保存</> : <><Edit2 size={16} /> 编辑</>}</button>)}
               </div>
               {isEditing ? (
-                <div data-color-mode={theme} className="h-[calc(100vh-200px)]" onPaste={handlePaste} onDrop={handleDrop}>
+                <div data-color-mode={theme} className="h-[calc(100vh-220px)]" onPaste={handlePaste} onDrop={handleDrop}>
                   <MDEditor 
                     value={markdownContent || ' '} 
                     onChange={setMarkdownContent} 
                     height="100%" 
                     previewOptions={{
-                      // === 这里的 rehypePlugins 加上了 rehypeRaw ===
                       remarkPlugins: [remarkGfm, remarkMath],
                       rehypePlugins: [rehypeRaw, rehypeKatex]
                     }}
                   />
                 </div>
               ) : (
-                <div className="prose prose-blue dark:prose-invert max-w-none pb-20">
+                <div className="prose prose-blue dark:prose-invert max-w-none">
                   <ReactMarkdown 
-                    // === 这里的 rehypePlugins 加上了 rehypeRaw ===
                     remarkPlugins={[remarkGfm, remarkMath]}
                     rehypePlugins={[rehypeRaw, rehypeKatex]}
                   >
@@ -342,7 +340,7 @@ export default function Home() {
                   </ReactMarkdown>
                 </div>
               )}
-            </>
+            </div>
           )}
         </div>
       </div>

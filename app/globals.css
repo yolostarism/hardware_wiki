@@ -1,22 +1,25 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography"; 
 
-/* 新增这一行：让 Tailwind 识别 .dark 类名来开启暗黑模式 */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* 这是亮色（默认）模式的颜色 */
 :root {
   --background: #ffffff;
   --foreground: #171717;
 }
 
-/* 这是当 <html> 标签加上 .dark 类名时的颜色 */
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
 }
 
-/* 让整个网页背景应用上面的变量 */
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -43,6 +46,12 @@ body {
 
 /* 3. 暗色模式：给行内代码调整适应暗黑背景的颜色 */
 .dark .prose :not(pre) > code {
-  background-color: #27272a; /* 深灰背景，适应你的 zinc 颜色 */
-  color: #fca5a5;            /* 浅红/粉色文字，保证对比度 */
+  background-color: #27272a;
+  color: #fca5a5;
+}
+
+.prose img {
+  max-width: 100%;
+  height: auto;
+  display: block;
 }
