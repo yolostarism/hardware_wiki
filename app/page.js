@@ -252,22 +252,30 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen bg-white dark:bg-zinc-950 text-black dark:text-zinc-100 transition-colors">
+    <div className="flex h-screen overflow-hidden bg-white dark:bg-zinc-950 text-black dark:text-zinc-100 transition-colors">
       
       {/* === 左侧目录树区域 === */}
-      <div className="w-72 bg-gray-50 dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 p-4 flex flex-col select-none transition-colors">
-        <h1 className="text-lg font-bold mb-6 text-gray-800 dark:text-gray-100 tracking-wide">⚙️ PZP 知识库</h1>
+      <div className="w-72 bg-gray-50 dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 flex flex-col select-none transition-colors">
+        <div className="p-4 pb-0">
+          <h1 className="text-lg font-bold text-gray-800 dark:text-gray-100 tracking-wide">⚙️ PZP 知识库</h1>
+        </div>
         {movingNode && (
-          <div className="bg-yellow-100 dark:bg-yellow-900/30 border-l-4 border-yellow-500 p-3 mb-4 text-xs rounded shadow-sm">
-            <p className="text-gray-700 dark:text-gray-300 mb-2">正在移动: <strong className="text-black dark:text-white">{movingNode.name}</strong></p>
-            <div className="flex gap-2">
-              <button onClick={moveToRoot} className="bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-600 px-2 py-1 rounded flex-1 dark:text-white">移至最外层</button>
-              <button onClick={() => setMovingNode(null)} className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800/50 px-2 py-1 rounded">取消</button>
+          <div className="px-4 py-2">
+            <div className="bg-yellow-100 dark:bg-yellow-900/30 border-l-4 border-yellow-500 p-3 text-xs rounded shadow-sm">
+              <p className="text-gray-700 dark:text-gray-300 mb-2">正在移动: <strong className="text-black dark:text-white">{movingNode.name}</strong></p>
+              <div className="flex gap-2">
+                <button onClick={moveToRoot} className="bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-600 px-2 py-1 rounded flex-1 dark:text-white">移至最外层</button>
+                <button onClick={() => setMovingNode(null)} className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800/50 px-2 py-1 rounded">取消</button>
+              </div>
             </div>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto pr-2">{isLoading ? <p className="text-gray-400 text-sm">加载中...</p> : renderTree(filteredDirectories)}</div>
-        {isAdmin && !movingNode && (<button onClick={() => handleAddNode('root', 'folder')} className="mt-4 flex flex-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600"><PlusCircle size={18} /><span>添加根目录</span></button>)}
+        <div className="flex-1 overflow-y-auto p-4 pt-2">{isLoading ? <p className="text-gray-400 text-sm">加载中...</p> : renderTree(filteredDirectories)}</div>
+        {isAdmin && !movingNode && (
+          <div className="p-4 pt-0">
+            <button onClick={() => handleAddNode('root', 'folder')} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600"><PlusCircle size={18} /><span>添加根目录</span></button>
+          </div>
+        )}
       </div>
 
       {/* === 右侧主内容区域 === */}
