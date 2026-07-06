@@ -5,7 +5,7 @@ import { useState, useEffect,useMemo } from 'react';
 import { 
   Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, 
   Edit2, Save, Trash2, FilePlus, FolderPlus, Edit, MoveRight,
-  Sun, Moon 
+  Sun, Moon, Clock, Star, Home as HomeIcon, ChevronLeft, ChevronRight, MapPin
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -20,6 +20,9 @@ import 'katex/dist/katex.min.css'; // 公式所需样式
 
 const MDEditor = nextDynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 const generateId = () => Math.random().toString(36).substr(2, 9);
+const RECENT_DOCS_KEY = 'pzp_wiki_recent_docs';
+const FAVORITE_DOCS_KEY = 'pzp_wiki_favorite_docs';
+const READING_POSITIONS_KEY = 'pzp_wiki_reading_positions';
 
 export default function Home() {
   const [userRole, setUserRole] = useState(null);
@@ -36,6 +39,8 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   
   const [theme, setTheme] = useState('light');
+  const [recentDocs, setRecentDocs] = useState([]);
+  const [favoriteDocs, setFavoriteDocs] = useState([]);
 
   useEffect(() => {
     const savedRole = localStorage.getItem('pzp_wiki_role');
@@ -46,6 +51,9 @@ export default function Home() {
     const initTheme = savedTheme === 'dark' ? 'dark' : 'light';
     setTheme(initTheme);
     document.documentElement.classList.toggle('dark', initTheme === 'dark');
+
+    setRecentDocs(JSON.parse(localStorage.getItem(RECENT_DOCS_KEY) || '[]'));
+    setFavoriteDocs(JSON.parse(localStorage.getItem(FAVORITE_DOCS_KEY) || '[]'));
   }, []);
 
   useEffect(() => {
@@ -82,12 +90,69 @@ export default function Home() {
     [directories, searchQuery]
   );
 
+  const flattenFiles = (nodes, parents = []) => {
+    return nodes.flatMap(node => {
+      const pathParts = [...parents, node.name];
+      if (node.type === 'file') {
+        return [{ ...node, path: pathParts.join(' / '), parentKey: node.parent_id || 'root' }];
+      }
+      return flattenFiles(node.children || [], pathParts);
+    });
+  };
+
+  const allFiles = useMemo(() => flattenFiles(directories), [directories]);
+  const activeFile = allFiles.find(file => file.id === activeFileId);
+  const siblingFiles = activeFile ? allFiles.filter(file => file.parentKey === activeFile.parentKey) : [];
+  const activeSiblingIndex = siblingFiles.findIndex(file => file.id === activeFileId);
+  const previousFile = activeSiblingIndex > 0 ? siblingFiles[activeSiblingIndex - 1] : null;
+  const nextFile = activeSiblingIndex >= 0 && activeSiblingIndex < siblingFiles.length - 1 ? siblingFiles[activeSiblingIndex + 1] : null;
+  const rootFolders = directories.filter(node => node.type === 'folder');
+
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
     localStorage.setItem('pzp_wiki_theme', nextTheme);
     document.documentElement.classList.toggle('dark', nextTheme === 'dark');
   };
+
+  const persistRecentDoc = (file) => {
+    if (!file) return;
+    const next = [
+      { id: file.id, name: file.name, path: file.path, openedAt: Date.now() },
+      ...recentDocs.filter(doc => doc.id !== file.id)
+    ].slice(0, 8);
+    setRecentDocs(next);
+    localStorage.setItem(RECENT_DOCS_KEY, JSON.stringify(next));
+  };
+
+  const toggleFavoriteDoc = () => {
+    if (!activeFile) return;
+    const exists = favoriteDocs.some(doc => doc.id === activeFile.id);
+    const next = exists
+      ? favoriteDocs.filter(doc => doc.id !== activeFile.id)
+      : [{ id: activeFile.id, name: activeFile.name, path: activeFile.path }, ...favoriteDocs].slice(0, 12);
+    setFavoriteDocs(next);
+    localStorage.setItem(FAVORITE_DOCS_KEY, JSON.stringify(next));
+  };
+
+  const restoreReadingPosition = (id) => {
+    requestAnimationFrame(() => {
+      const positions = JSON.parse(localStorage.getItem(READING_POSITIONS_KEY) || '{}');
+      const container = document.getElementById('article-scroll-area');
+      if (container) container.scrollTop = positions[id] || 0;
+    });
+  };
+
+  const saveReadingPosition = () => {
+    if (!activeFileId || isEditing) return;
+    const container = document.getElementById('article-scroll-area');
+    if (!container) return;
+    const positions = JSON.parse(localStorage.getItem(READING_POSITIONS_KEY) || '{}');
+    positions[activeFileId] = container.scrollTop;
+    localStorage.setItem(READING_POSITIONS_KEY, JSON.stringify(positions));
+  };
+
+  const isFavorite = activeFile ? favoriteDocs.some(doc => doc.id === activeFile.id) : false;
 
   const loadTreeData = async () => {
     setIsLoading(true);
@@ -172,6 +237,20 @@ export default function Home() {
     }
   };
 
+  const openFile = async (file) => {
+    if (!file) return;
+    setActiveFileId(file.id);
+    setActiveTitle(file.name);
+    setIsEditing(false);
+    setMarkdownContent("加载云端数据中...");
+    persistRecentDoc(file);
+    const res = await getDocument(file.id);
+    if (res.success) {
+      setMarkdownContent(res.content);
+      restoreReadingPosition(file.id);
+    }
+  };
+
   const handleItemClick = async (node) => {
     if (movingNode) {
       if (node.id === movingNode.id) return;
@@ -186,10 +265,7 @@ export default function Home() {
       });
       setDirectories(toggleNode(directories));
     } else {
-      setActiveFileId(node.id); setActiveTitle(node.name); setIsEditing(false);
-      setMarkdownContent("加载云端数据中...");
-      const res = await getDocument(node.id);
-      if (res.success) setMarkdownContent(res.content);
+      await openFile(allFiles.find(item => item.id === node.id) || node);
     }
   };
 
@@ -225,6 +301,80 @@ export default function Home() {
     await updateDocument(activeFileId, markdownContent);
     alert("云端保存成功！"); setIsEditing(false);
   };
+
+  const renderDocShortcut = (doc, icon = <FileText size={15} />) => (
+    <button
+      key={doc.id}
+      onClick={() => openFile(allFiles.find(file => file.id === doc.id) || doc)}
+      className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-left hover:bg-gray-100 dark:hover:bg-zinc-800 transition"
+    >
+      <span className="text-blue-500 shrink-0">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{doc.name}</span>
+        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{doc.path || '未记录路径'}</span>
+      </span>
+    </button>
+  );
+
+  const renderLearningHome = () => (
+    <div className="h-full overflow-y-auto p-8 bg-white dark:bg-zinc-950">
+      <div className="max-w-6xl mx-auto">
+        <div className="mb-8">
+          <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-2">学习入口</p>
+          <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">继续你的硬件知识库</h2>
+          <p className="text-gray-500 dark:text-gray-400 mt-2">从最近打开、收藏文章或根目录开始，不需要每次都从目录树里重新翻。</p>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+          <section className="border border-gray-200 dark:border-zinc-800 rounded-lg p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Clock size={18} className="text-blue-500" />
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">最近打开</h3>
+            </div>
+            {recentDocs.length > 0 ? (
+              <div className="space-y-1">{recentDocs.map(doc => renderDocShortcut(doc, <Clock size={15} />))}</div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">打开几篇文章后，这里会自动记录。</p>
+            )}
+          </section>
+
+          <section className="border border-gray-200 dark:border-zinc-800 rounded-lg p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Star size={18} className="text-yellow-500" />
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">收藏文章</h3>
+            </div>
+            {favoriteDocs.length > 0 ? (
+              <div className="space-y-1">{favoriteDocs.map(doc => renderDocShortcut(doc, <Star size={15} />))}</div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">在文章页点击收藏，常用资料会出现在这里。</p>
+            )}
+          </section>
+
+          <section className="border border-gray-200 dark:border-zinc-800 rounded-lg p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <HomeIcon size={18} className="text-green-500" />
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">根目录概览</h3>
+            </div>
+            {rootFolders.length > 0 ? (
+              <div className="space-y-2">
+                {rootFolders.slice(0, 8).map(folder => (
+                  <div key={folder.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-gray-50 dark:bg-zinc-900">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <Folder size={15} className="text-gray-500 shrink-0" />
+                      <span className="text-sm truncate">{folder.name}</span>
+                    </span>
+                    <span className="text-xs text-gray-500 shrink-0">{folder.children?.length || 0} 项</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">左侧目录加载后，这里会显示根目录。</p>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
 
   const renderTree = (nodes, level = 0) => {
     return nodes.map((node) => (
@@ -308,15 +458,34 @@ export default function Home() {
         </div>
 
         {/* 文章阅读/编辑区 */}
-        <div className="flex-1 min-h-0 overflow-y-auto bg-white dark:bg-zinc-950 transition-colors">
-          {!activeFileId ? (<div className="flex h-full items-center justify-center text-gray-400 dark:text-gray-600">👈 请在左侧选择文章</div>) : (
+        <div id="article-scroll-area" onScroll={saveReadingPosition} className="flex-1 min-h-0 overflow-y-auto bg-white dark:bg-zinc-950 transition-colors">
+          {!activeFileId ? (renderLearningHome()) : (
             <div className="p-8">
               <div className="flex justify-between items-start mb-6 border-b dark:border-zinc-800 pb-4">
                 <div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    <MapPin size={14} />
+                    <span>{activeFile?.path || activeTitle}</span>
+                  </div>
                   <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{activeTitle}</h2>
                   {isUploading && <span className="text-sm text-blue-500 mt-2 block animate-pulse">图片拼命上传中，请稍候...</span>}
                 </div>
-                {isAdmin && (<button onClick={() => isEditing ? handleSave() : setIsEditing(true)} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm transition ${isEditing ? 'bg-green-600 text-white dark:bg-green-700' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>{isEditing ? <><Save size={16} /> 保存</> : <><Edit2 size={16} /> 编辑</>}</button>)}
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button onClick={toggleFavoriteDoc} className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition ${isFavorite ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>
+                    <Star size={16} /> {isFavorite ? '已收藏' : '收藏'}
+                  </button>
+                  {previousFile && (
+                    <button onClick={() => openFile(previousFile)} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200">
+                      <ChevronLeft size={16} /> 上一篇
+                    </button>
+                  )}
+                  {nextFile && (
+                    <button onClick={() => openFile(nextFile)} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200">
+                      下一篇 <ChevronRight size={16} />
+                    </button>
+                  )}
+                  {isAdmin && (<button onClick={() => isEditing ? handleSave() : setIsEditing(true)} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm transition ${isEditing ? 'bg-green-600 text-white dark:bg-green-700' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>{isEditing ? <><Save size={16} /> 保存</> : <><Edit2 size={16} /> 编辑</>}</button>)}
+                </div>
               </div>
               {isEditing ? (
                 <div data-color-mode={theme} className="h-[calc(100vh-220px)]" onPaste={handlePaste} onDrop={handleDrop}>
