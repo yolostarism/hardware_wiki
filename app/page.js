@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect,useMemo } from 'react';
 import { 
   Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, 
-  Edit2, Save, FilePlus, FolderPlus, MoveRight,
+  Edit2, Save, FilePlus, FolderPlus,
   Sun, Moon, Clock, Star, Home as HomeIcon, ChevronLeft, ChevronRight, MapPin
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -39,7 +39,6 @@ export default function Home() {
   const [isUploading, setIsUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedFolderIds, setExpandedFolderIds] = useState([]);
-  const [moveTargetQuery, setMoveTargetQuery] = useState('');
   
   const [theme, setTheme] = useState('light');
   const [recentDocs, setRecentDocs] = useState([]);
@@ -252,27 +251,8 @@ export default function Home() {
     setActiveFileId(null);
   };
 
-  const startMovingFile = (file) => {
-    if (!isAdmin || !file) return;
-    setMovingNode(file);
-    setMoveTargetQuery('');
-  };
-
-  const cancelMovingFile = () => {
-    setMovingNode(null);
-    setMoveTargetQuery('');
-  };
-
-  const confirmMoveFile = async (targetFolder) => {
-    if (!isAdmin || !movingNode || !targetFolder) return;
-    if (movingNode.parentKey === targetFolder.id || movingNode.parent_id === targetFolder.id) {
-      cancelMovingFile();
-      return;
-    }
-    await moveNode(movingNode.id, targetFolder.id);
-    await loadTreeData();
-    if (activeFileId === movingNode.id) setActiveFolderId(targetFolder.id);
-    cancelMovingFile();
+  const moveToRoot = async () => {
+    await moveNode(movingNode.id, null); await loadTreeData(); setMovingNode(null);
   };
 
   const handleSave = async () => {
@@ -392,99 +372,21 @@ export default function Home() {
                 <ChevronRight size={14} className="text-gray-400 shrink-0" />
               </button>
             ))}
-            {nestedFiles.map(file => renderArticleRow(file))}
+            {nestedFiles.map(file => (
+              <button key={file.id} type="button" onClick={() => openFile(file)} className="w-full flex items-center justify-between gap-3 rounded-md px-3 py-2 text-left hover:bg-white dark:hover:bg-zinc-800 transition">
+                <span className="flex items-center gap-2 min-w-0">
+                  <FileText size={15} className="text-gray-400 shrink-0" />
+                  <span className="text-sm text-gray-800 dark:text-gray-100 truncate">{file.name}</span>
+                </span>
+                <ChevronRight size={14} className="text-gray-400 shrink-0" />
+              </button>
+            ))}
             {nestedFolders.length === 0 && nestedFiles.length === 0 && (
               <p className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">这个子目录暂时是空的。</p>
             )}
           </div>
         )}
       </div>
-    );
-  };
-
-  const renderArticleRow = (file) => (
-    <div key={file.id} className="flex items-stretch hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
-      <button type="button" onClick={() => openFile(file)} className="min-w-0 flex-1 flex items-center justify-between gap-3 px-4 py-3 text-left">
-        <span className="flex items-center gap-3 min-w-0">
-          <FileText size={16} className="text-gray-400 shrink-0" />
-          <span className="min-w-0">
-            <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{file.name}</span>
-            <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{file.path || activeFolder?.path}</span>
-          </span>
-        </span>
-        <ChevronRight size={16} className="text-gray-400 shrink-0" />
-      </button>
-      {isAdmin && (
-        <button
-          type="button"
-          onClick={() => startMovingFile(file)}
-          className={`w-24 border-l border-gray-200 dark:border-zinc-800 flex items-center justify-center gap-1 text-sm transition ${movingNode?.id === file.id ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300'}`}
-          title="移动到其他目录"
-        >
-          <MoveRight size={15} /> 移动
-        </button>
-      )}
-    </div>
-  );
-
-  const renderMoveTargetPanel = () => {
-    if (!isAdmin || !movingNode) return null;
-
-    const query = moveTargetQuery.trim().toLowerCase();
-    const candidateFolders = allFolders
-      .filter(folder => folder.id !== movingNode.id)
-      .filter(folder => !query || folder.name.toLowerCase().includes(query) || folder.path.toLowerCase().includes(query))
-      .slice(0, 30);
-
-    return (
-      <section className="mb-8 border border-blue-200 dark:border-blue-900/60 rounded-lg bg-blue-50/70 dark:bg-blue-950/20 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-4">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">移动文章</p>
-            <p className="text-sm text-blue-700/80 dark:text-blue-200/70 truncate">{movingNode.name}</p>
-          </div>
-          <button type="button" onClick={cancelMovingFile} className="self-start px-3 py-1.5 rounded-md text-sm bg-white text-gray-700 hover:bg-gray-100 dark:bg-zinc-900 dark:text-gray-200 dark:hover:bg-zinc-800">
-            取消
-          </button>
-        </div>
-
-        <div className="relative mb-3">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={moveTargetQuery}
-            onChange={(event) => setMoveTargetQuery(event.target.value)}
-            placeholder="搜索目标目录..."
-            className="w-full pl-9 pr-3 py-2 rounded-md border border-blue-200 dark:border-blue-900/70 bg-white dark:bg-zinc-950 text-sm focus:outline-none focus:border-blue-500"
-          />
-        </div>
-
-        <div className="max-h-72 overflow-y-auto border border-blue-100 dark:border-blue-900/50 rounded-lg divide-y divide-blue-100 dark:divide-blue-900/50 bg-white dark:bg-zinc-950">
-          {candidateFolders.length > 0 ? candidateFolders.map(folder => {
-            const isCurrentFolder = movingNode.parentKey === folder.id || movingNode.parent_id === folder.id;
-            return (
-              <button
-                key={folder.id}
-                type="button"
-                disabled={isCurrentFolder}
-                onClick={() => confirmMoveFile(folder)}
-                className={`w-full flex items-center justify-between gap-3 px-4 py-3 text-left transition ${isCurrentFolder ? 'cursor-not-allowed text-gray-400 dark:text-gray-600' : 'hover:bg-blue-50 dark:hover:bg-zinc-900 text-gray-800 dark:text-gray-100'}`}
-              >
-                <span className="flex items-center gap-3 min-w-0">
-                  <Folder size={16} className="text-blue-500 shrink-0" />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium truncate">{folder.name}</span>
-                    <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{folder.path}</span>
-                  </span>
-                </span>
-                <span className="text-xs text-gray-500 shrink-0">{isCurrentFolder ? '当前位置' : '移动到这里'}</span>
-              </button>
-            );
-          }) : (
-            <p className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">没有匹配的目录。</p>
-          )}
-        </div>
-      </section>
     );
   };
 
@@ -592,8 +494,6 @@ export default function Home() {
             </div>
           </div>
 
-          {renderMoveTargetPanel()}
-
           {childFolders.length > 0 && (
             <section className="mb-8">
               <div className="flex items-center gap-2 mb-3">
@@ -613,7 +513,18 @@ export default function Home() {
             </div>
             {childFiles.length > 0 ? (
               <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
-                {childFiles.map(file => renderArticleRow(file))}
+                {childFiles.map(file => (
+                  <button key={file.id} type="button" onClick={() => openFile(file)} className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <FileText size={16} className="text-gray-400 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{file.name}</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{file.path || activeFolder.path}</span>
+                      </span>
+                    </span>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
               </div>
             ) : (
               <div className="border border-dashed border-gray-300 dark:border-zinc-700 rounded-lg px-4 py-8 text-sm text-gray-500 dark:text-gray-400">
@@ -629,7 +540,18 @@ export default function Home() {
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">子目录文章</h3>
               </div>
               <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
-                {descendantFiles.map(file => renderArticleRow(file))}
+                {descendantFiles.map(file => (
+                  <button key={file.id} type="button" onClick={() => openFile(file)} className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <FileText size={16} className="text-gray-400 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{file.name}</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{file.path}</span>
+                      </span>
+                    </span>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
               </div>
             </section>
           )}
@@ -653,8 +575,6 @@ export default function Home() {
               找到 {matchedFolders.length} 个目录，{matchedFiles.length} 篇文章
             </p>
           </div>
-
-          {renderMoveTargetPanel()}
 
           {matchedFolders.length > 0 && (
             <section className="mb-8">
@@ -686,7 +606,18 @@ export default function Home() {
             </div>
             {matchedFiles.length > 0 ? (
               <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
-                {matchedFiles.map(file => renderArticleRow(file))}
+                {matchedFiles.map(file => (
+                  <button key={file.id} type="button" onClick={() => openFile(file)} className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <FileText size={16} className="text-gray-400 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{file.name}</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{file.path}</span>
+                      </span>
+                    </span>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
               </div>
             ) : (
               <div className="border border-dashed border-gray-300 dark:border-zinc-700 rounded-lg px-4 py-8 text-sm text-gray-500 dark:text-gray-400">
@@ -710,6 +641,17 @@ export default function Home() {
             <HomeIcon size={16} /> 学习首页
           </button>
         </div>
+        {movingNode && (
+          <div className="px-4 py-2">
+            <div className="bg-yellow-100 dark:bg-yellow-900/30 border-l-4 border-yellow-500 p-3 text-xs rounded shadow-sm">
+              <p className="text-gray-700 dark:text-gray-300 mb-2">正在移动: <strong className="text-black dark:text-white">{movingNode.name}</strong></p>
+              <div className="flex gap-2">
+                <button onClick={moveToRoot} className="bg-white dark:bg-zinc-800 border border-gray-300 dark:border-zinc-600 px-2 py-1 rounded flex-1 dark:text-white">移至最外层</button>
+                <button onClick={() => setMovingNode(null)} className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800/50 px-2 py-1 rounded">取消</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
           {isLoading ? (
             <p className="text-gray-400 text-sm">加载中...</p>
@@ -825,15 +767,9 @@ export default function Home() {
                       下一篇 <ChevronRight size={16} />
                     </button>
                   )}
-                  {isAdmin && activeFile && (
-                    <button onClick={() => startMovingFile(activeFile)} className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition ${movingNode?.id === activeFile.id ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>
-                      <MoveRight size={16} /> 移动
-                    </button>
-                  )}
                   {isAdmin && (<button onClick={() => isEditing ? handleSave() : setIsEditing(true)} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm transition ${isEditing ? 'bg-green-600 text-white dark:bg-green-700' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>{isEditing ? <><Save size={16} /> 保存</> : <><Edit2 size={16} /> 编辑</>}</button>)}
                 </div>
               </div>
-              {renderMoveTargetPanel()}
               {isEditing ? (
                 <div data-color-mode={theme} className="h-[calc(100vh-220px)]" onPaste={handlePaste} onDrop={handleDrop}>
                   <MDEditor 
