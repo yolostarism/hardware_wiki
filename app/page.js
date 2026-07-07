@@ -29,6 +29,7 @@ export default function Home() {
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [activeFileId, setActiveFileId] = useState(null);
+  const [activeFolderId, setActiveFolderId] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [directories, setDirectories] = useState([]);
   const [markdownContent, setMarkdownContent] = useState("");
@@ -108,6 +109,20 @@ export default function Home() {
   const nextFile = activeSiblingIndex >= 0 && activeSiblingIndex < siblingFiles.length - 1 ? siblingFiles[activeSiblingIndex + 1] : null;
   const rootFolders = directories.filter(node => node.type === 'folder');
 
+  const flattenFolders = (nodes, parents = []) => {
+    return nodes.flatMap(node => {
+      if (node.type !== 'folder') return [];
+      const pathParts = [...parents, node.name];
+      return [
+        { ...node, path: pathParts.join(' / ') },
+        ...flattenFolders(node.children || [], pathParts)
+      ];
+    });
+  };
+
+  const allFolders = useMemo(() => flattenFolders(directories), [directories]);
+  const activeFolder = allFolders.find(folder => folder.id === activeFolderId);
+
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
@@ -178,7 +193,7 @@ export default function Home() {
 
   const handleLogout = () => {
     setUserRole(null); localStorage.removeItem('pzp_wiki_role');
-    setDirectories([]); setActiveFileId(null); setMovingNode(null);
+    setDirectories([]); setActiveFileId(null); setActiveFolderId(null); setMovingNode(null);
   };
 
   const isAdmin = userRole === 'admin';
@@ -240,6 +255,7 @@ export default function Home() {
   const openFile = async (file) => {
     if (!file) return;
     setActiveFileId(file.id);
+    setActiveFolderId(file.parentKey || file.parent_id || null);
     setActiveTitle(file.name);
     setIsEditing(false);
     setMarkdownContent("加载云端数据中...");
@@ -264,6 +280,9 @@ export default function Home() {
         if (item.children) return { ...item, children: toggleNode(item.children) }; return item;
       });
       setDirectories(toggleNode(directories));
+      setActiveFolderId(node.id);
+      setActiveFileId(null);
+      setIsEditing(false);
     } else {
       await openFile(allFiles.find(item => item.id === node.id) || node);
     }
@@ -283,6 +302,7 @@ export default function Home() {
     if (!confirm(`确定要删除 "${nodeName}" 吗？`)) return;
     await deleteNode(id); await loadTreeData();
     if (activeFileId === id) setActiveFileId(null);
+    if (activeFolderId === id) setActiveFolderId(null);
   };
 
   const handleRenameNode = async (id, oldName) => {
@@ -300,6 +320,13 @@ export default function Home() {
   const handleSave = async () => {
     await updateDocument(activeFileId, markdownContent);
     alert("云端保存成功！"); setIsEditing(false);
+  };
+
+  const openFolder = (folder) => {
+    if (!folder) return;
+    setActiveFolderId(folder.id);
+    setActiveFileId(null);
+    setIsEditing(false);
   };
 
   const renderDocShortcut = (doc, icon = <FileText size={15} />) => (
@@ -358,13 +385,15 @@ export default function Home() {
             {rootFolders.length > 0 ? (
               <div className="space-y-2">
                 {rootFolders.slice(0, 8).map(folder => (
-                  <div key={folder.id} className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-gray-50 dark:bg-zinc-900">
+                  <button key={folder.id} type="button" onClick={() => openFolder(folder)} className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-gray-50 dark:bg-zinc-900 hover:bg-gray-100 dark:hover:bg-zinc-800 text-left transition">
                     <span className="flex items-center gap-2 min-w-0">
                       <Folder size={15} className="text-gray-500 shrink-0" />
                       <span className="text-sm truncate">{folder.name}</span>
                     </span>
-                    <span className="text-xs text-gray-500 shrink-0">{folder.children?.length || 0} 项</span>
-                  </div>
+                    <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
+                      {folder.children?.length || 0} 项 <ChevronRight size={13} />
+                    </span>
+                  </button>
                 ))}
               </div>
             ) : (
@@ -376,10 +405,87 @@ export default function Home() {
     </div>
   );
 
+  const renderFolderPanel = () => {
+    if (!activeFolder) return renderLearningHome();
+
+    const childFolders = (activeFolder.children || []).filter(child => child.type === 'folder');
+    const childFiles = (activeFolder.children || [])
+      .filter(child => child.type === 'file')
+      .map(file => allFiles.find(item => item.id === file.id) || file);
+
+    return (
+      <div className="h-full overflow-y-auto p-8 bg-white dark:bg-zinc-950">
+        <div className="max-w-6xl mx-auto">
+          <div className="mb-8">
+            <button type="button" onClick={() => setActiveFolderId(null)} className="mb-4 inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
+              <ChevronLeft size={16} /> 返回学习首页
+            </button>
+            <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-2">目录浏览</p>
+            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{activeFolder.name}</h2>
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mt-2">
+              <MapPin size={14} />
+              <span className="truncate">{activeFolder.path}</span>
+            </div>
+          </div>
+
+          {childFolders.length > 0 && (
+            <section className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <FolderOpen size={18} className="text-blue-500" />
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100">子目录</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {childFolders.map(folder => (
+                  <button key={folder.id} type="button" onClick={() => openFolder(allFolders.find(item => item.id === folder.id) || folder)} className="flex items-center justify-between gap-3 border border-gray-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <Folder size={17} className="text-blue-500 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{folder.name}</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400">{folder.children?.length || 0} 项</span>
+                      </span>
+                    </span>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <FileText size={18} className="text-green-600 dark:text-green-400" />
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">文章</h3>
+            </div>
+            {childFiles.length > 0 ? (
+              <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
+                {childFiles.map(file => (
+                  <button key={file.id} type="button" onClick={() => openFile(file)} className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <FileText size={16} className="text-gray-400 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{file.name}</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{file.path || activeFolder.path}</span>
+                      </span>
+                    </span>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="border border-dashed border-gray-300 dark:border-zinc-700 rounded-lg px-4 py-8 text-sm text-gray-500 dark:text-gray-400">
+                这个目录下暂时没有文章。
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  };
+
   const renderTree = (nodes, level = 0) => {
     return nodes.map((node) => (
       <div key={node.id} style={{ paddingLeft: `${level * 8}px` }} className="mt-1">
-        <div className={`flex items-center justify-between px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer text-sm group ${activeFileId === node.id ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'} ${movingNode?.id === node.id ? 'opacity-50' : ''}`}>
+        <div className={`flex items-center justify-between px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer text-sm group ${(activeFileId === node.id || activeFolderId === node.id) ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'} ${movingNode?.id === node.id ? 'opacity-50' : ''}`}>
           <div className="flex items-center gap-2 overflow-hidden flex-1" onClick={() => handleItemClick(node)}>
             {node.type === 'folder' ? (node.isExpanded ? <FolderOpen size={16} className="text-blue-500 shrink-0" /> : <Folder size={16} className="text-gray-500 shrink-0" />) : (<FileText size={16} className={`${activeFileId === node.id ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'} shrink-0`} />)}
             <span className="truncate select-none">{node.name}</span>
@@ -459,7 +565,7 @@ export default function Home() {
 
         {/* 文章阅读/编辑区 */}
         <div id="article-scroll-area" onScroll={saveReadingPosition} className="flex-1 min-h-0 overflow-y-auto bg-white dark:bg-zinc-950 transition-colors">
-          {!activeFileId ? (renderLearningHome()) : (
+          {!activeFileId ? (activeFolder ? renderFolderPanel() : renderLearningHome()) : (
             <div className="p-8">
               <div className="flex justify-between items-start mb-6 border-b dark:border-zinc-800 pb-4">
                 <div>
