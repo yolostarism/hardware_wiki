@@ -459,6 +459,11 @@ export default function Home() {
     const childFiles = (activeFolder.children || [])
       .filter(child => child.type === 'file')
       .map(file => allFiles.find(item => item.id === file.id) || file);
+    const descendantFiles = allFiles.filter(file =>
+      file.id !== activeFileId &&
+      file.path?.startsWith(`${activeFolder.path} / `) &&
+      file.parentKey !== activeFolder.id
+    );
 
     return (
       <div className="h-full overflow-y-auto p-8 bg-white dark:bg-zinc-950">
@@ -504,7 +509,7 @@ export default function Home() {
           <section>
             <div className="flex items-center gap-2 mb-3">
               <FileText size={18} className="text-green-600 dark:text-green-400" />
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100">文章</h3>
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">当前目录文章</h3>
             </div>
             {childFiles.length > 0 ? (
               <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
@@ -527,6 +532,29 @@ export default function Home() {
               </div>
             )}
           </section>
+
+          {descendantFiles.length > 0 && (
+            <section className="mt-8">
+              <div className="flex items-center gap-2 mb-3">
+                <FileText size={18} className="text-blue-500" />
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100">子目录文章</h3>
+              </div>
+              <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
+                {descendantFiles.map(file => (
+                  <button key={file.id} type="button" onClick={() => openFile(file)} className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <FileText size={16} className="text-gray-400 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{file.name}</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{file.path}</span>
+                      </span>
+                    </span>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     );
