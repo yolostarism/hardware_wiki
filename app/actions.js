@@ -1,5 +1,14 @@
 'use server'; // 这一行极其重要！告诉 Next.js 这是要在服务器上运行的安全代码
 import { sql } from '@vercel/postgres';
+import { neonConfig } from '@neondatabase/serverless';
+import { ProxyAgent, fetch as undiciFetch } from 'undici';
+
+const neonProxyUrl = process.env.NEON_FETCH_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || (process.env.NODE_ENV !== 'production' ? 'http://127.0.0.1:7890' : '');
+
+if (neonProxyUrl) {
+  const neonProxyAgent = new ProxyAgent(neonProxyUrl);
+  neonConfig.fetchFunction = (url, init) => undiciFetch(url, { ...init, dispatcher: neonProxyAgent });
+}
 
 // 1. 获取所有目录树
 export async function getDirectories() {
