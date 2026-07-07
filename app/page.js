@@ -38,6 +38,7 @@ export default function Home() {
   const [movingNode, setMovingNode] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedFolderIds, setExpandedFolderIds] = useState([]);
   
   const [theme, setTheme] = useState('light');
   const [recentDocs, setRecentDocs] = useState([]);
@@ -92,6 +93,7 @@ export default function Home() {
 
   const allFolders = useMemo(() => flattenFolders(directories), [directories]);
   const activeFolder = allFolders.find(folder => folder.id === activeFolderId);
+  const activeFolderParent = activeFolder?.parent_id ? allFolders.find(folder => folder.id === activeFolder.parent_id) : null;
 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
@@ -226,6 +228,7 @@ export default function Home() {
     if (!file) return;
     setActiveFileId(file.id);
     setActiveFolderId(file.parentKey || file.parent_id || null);
+    setSearchQuery('');
     setActiveTitle(file.name);
     setIsEditing(false);
     setMarkdownContent("加载云端数据中...");
@@ -261,13 +264,34 @@ export default function Home() {
     if (!folder) return;
     setActiveFolderId(folder.id);
     setActiveFileId(null);
+    setSearchQuery('');
     setIsEditing(false);
   };
 
   const openHome = () => {
     setActiveFileId(null);
     setActiveFolderId(null);
+    setSearchQuery('');
     setIsEditing(false);
+  };
+
+  const goToParentFolder = () => {
+    if (activeFolderParent) openFolder(activeFolderParent);
+    else openHome();
+  };
+
+  const returnFromArticle = () => {
+    setActiveFileId(null);
+    setIsEditing(false);
+    if (!activeFolder) openHome();
+  };
+
+  const toggleInlineFolder = (folderId) => {
+    setExpandedFolderIds(current =>
+      current.includes(folderId)
+        ? current.filter(id => id !== folderId)
+        : [...current, folderId]
+    );
   };
 
   const renderDocShortcut = (doc, icon = <FileText size={15} />) => (
@@ -310,6 +334,61 @@ export default function Home() {
       <span className="text-xs text-gray-400 shrink-0">{folder.children?.length || 0}</span>
     </button>
   );
+
+  const renderNestedFolderPreview = (folder) => {
+    const fullFolder = allFolders.find(item => item.id === folder.id) || folder;
+    const nestedFolders = (fullFolder.children || []).filter(child => child.type === 'folder');
+    const nestedFiles = (fullFolder.children || [])
+      .filter(child => child.type === 'file')
+      .map(file => allFiles.find(item => item.id === file.id) || file);
+    const isExpanded = expandedFolderIds.includes(folder.id);
+
+    return (
+      <div key={folder.id} className="border border-gray-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+        <div className="flex items-stretch">
+          <button type="button" onClick={() => openFolder(fullFolder)} className="flex-1 flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+            <span className="flex items-center gap-3 min-w-0">
+              <Folder size={17} className="text-blue-500 shrink-0" />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{folder.name}</span>
+                <span className="block text-xs text-gray-500 dark:text-gray-400">{folder.children?.length || 0} 项</span>
+              </span>
+            </span>
+            <span className="text-xs text-gray-400 shrink-0">进入</span>
+          </button>
+          <button type="button" onClick={() => toggleInlineFolder(folder.id)} className="w-12 border-l border-gray-200 dark:border-zinc-800 flex items-center justify-center text-gray-500 hover:bg-gray-50 dark:hover:bg-zinc-900 transition" aria-label={isExpanded ? `收起 ${folder.name}` : `展开 ${folder.name}`}>
+            <ChevronRight size={16} className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+          </button>
+        </div>
+
+        {isExpanded && (
+          <div className="border-t border-gray-200 dark:border-zinc-800 bg-gray-50/70 dark:bg-zinc-900/60 px-3 py-2 space-y-1">
+            {nestedFolders.map(childFolder => (
+              <button key={childFolder.id} type="button" onClick={() => openFolder(allFolders.find(item => item.id === childFolder.id) || childFolder)} className="w-full flex items-center justify-between gap-3 rounded-md px-3 py-2 text-left hover:bg-white dark:hover:bg-zinc-800 transition">
+                <span className="flex items-center gap-2 min-w-0">
+                  <Folder size={15} className="text-blue-500 shrink-0" />
+                  <span className="text-sm text-gray-800 dark:text-gray-100 truncate">{childFolder.name}</span>
+                </span>
+                <ChevronRight size={14} className="text-gray-400 shrink-0" />
+              </button>
+            ))}
+            {nestedFiles.map(file => (
+              <button key={file.id} type="button" onClick={() => openFile(file)} className="w-full flex items-center justify-between gap-3 rounded-md px-3 py-2 text-left hover:bg-white dark:hover:bg-zinc-800 transition">
+                <span className="flex items-center gap-2 min-w-0">
+                  <FileText size={15} className="text-gray-400 shrink-0" />
+                  <span className="text-sm text-gray-800 dark:text-gray-100 truncate">{file.name}</span>
+                </span>
+                <ChevronRight size={14} className="text-gray-400 shrink-0" />
+              </button>
+            ))}
+            {nestedFolders.length === 0 && nestedFiles.length === 0 && (
+              <p className="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">这个子目录暂时是空的。</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderLearningHome = () => (
     <div className="h-full overflow-y-auto p-8 bg-white dark:bg-zinc-950">
@@ -385,8 +464,8 @@ export default function Home() {
       <div className="h-full overflow-y-auto p-8 bg-white dark:bg-zinc-950">
         <div className="max-w-6xl mx-auto">
           <div className="mb-8">
-            <button type="button" onClick={() => setActiveFolderId(null)} className="mb-4 inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
-              <ChevronLeft size={16} /> 返回学习首页
+            <button type="button" onClick={goToParentFolder} className="mb-4 inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
+              <ChevronLeft size={16} /> {activeFolderParent ? `返回 ${activeFolderParent.name}` : '返回学习首页'}
             </button>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
@@ -417,18 +496,7 @@ export default function Home() {
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">子目录</h3>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {childFolders.map(folder => (
-                  <button key={folder.id} type="button" onClick={() => openFolder(allFolders.find(item => item.id === folder.id) || folder)} className="flex items-center justify-between gap-3 border border-gray-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
-                    <span className="flex items-center gap-3 min-w-0">
-                      <Folder size={17} className="text-blue-500 shrink-0" />
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{folder.name}</span>
-                        <span className="block text-xs text-gray-500 dark:text-gray-400">{folder.children?.length || 0} 项</span>
-                      </span>
-                    </span>
-                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
-                  </button>
-                ))}
+                {childFolders.map(folder => renderNestedFolderPreview(folder))}
               </div>
             </section>
           )}
@@ -645,6 +713,9 @@ export default function Home() {
         <div id="article-scroll-area" onScroll={saveReadingPosition} className="flex-1 min-h-0 overflow-y-auto bg-white dark:bg-zinc-950 transition-colors">
           {searchQuery.trim() ? renderSearchResults() : !activeFileId ? (activeFolder ? renderFolderPanel() : renderLearningHome()) : (
             <div className="p-8">
+              <button type="button" onClick={returnFromArticle} className="mb-4 inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
+                <ChevronLeft size={16} /> {activeFolder ? `返回 ${activeFolder.name}` : '返回学习首页'}
+              </button>
               <div className="flex justify-between items-start mb-6 border-b dark:border-zinc-800 pb-4">
                 <div>
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
