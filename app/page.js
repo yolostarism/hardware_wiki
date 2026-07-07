@@ -4,13 +4,13 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect,useMemo } from 'react';
 import { 
   Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, 
-  Edit2, Save, Trash2, FilePlus, FolderPlus, Edit, MoveRight,
+  Edit2, Save, FilePlus, FolderPlus,
   Sun, Moon, Clock, Star, Home as HomeIcon, ChevronLeft, ChevronRight, MapPin
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import nextDynamic from 'next/dynamic'; 
-import { getDirectories, getDocument, addNode, deleteNode, updateDocument, renameNode, moveNode } from './actions';
+import { getDirectories, getDocument, addNode, updateDocument, moveNode } from './actions';
 
 // === 新增：引入数学公式和 HTML 解析插件 ===
 import remarkMath from 'remark-math';
@@ -60,36 +60,6 @@ export default function Home() {
   useEffect(() => {
     if (userRole) loadTreeData();
   }, [userRole]);
-
-  // 过滤目录树的逻辑
-  const filterTree = (nodes, query) => {
-    if (!query) return nodes;
-
-    return nodes.map(node => {
-      // 递归过滤子节点
-      const filteredChildren = node.children ? filterTree(node.children, query) : [];
-
-      // 检查当前节点名称是否包含关键词
-      const isMatch = node.name.toLowerCase().includes(query.toLowerCase());
-
-      // 如果当前节点匹配，或者子节点有匹配项，则保留该节点
-      if (isMatch || filteredChildren.length > 0) {
-        return {
-          ...node,
-          children: filteredChildren,
-          // 搜索时强制展开匹配的文件夹
-          isExpanded: true
-        };
-      }
-      return null;
-    }).filter(Boolean); // 移除不匹配的 null 节点
-  };
-
-  // 获取过滤后的目录
-  const filteredDirectories = useMemo(() =>
-    filterTree(directories, searchQuery),
-    [directories, searchQuery]
-  );
 
   const flattenFiles = (nodes, parents = []) => {
     return nodes.flatMap(node => {
@@ -267,27 +237,6 @@ export default function Home() {
     }
   };
 
-  const handleItemClick = async (node) => {
-    if (movingNode) {
-      if (node.id === movingNode.id) return;
-      if (node.type !== 'folder') return alert('只能移动到文件夹里面哦！');
-      await moveNode(movingNode.id, node.id);
-      await loadTreeData(); setMovingNode(null); return;
-    }
-    if (node.type === 'folder') {
-      const toggleNode = (items) => items.map(item => {
-        if (item.id === node.id) return { ...item, isExpanded: !item.isExpanded };
-        if (item.children) return { ...item, children: toggleNode(item.children) }; return item;
-      });
-      setDirectories(toggleNode(directories));
-      setActiveFolderId(node.id);
-      setActiveFileId(null);
-      setIsEditing(false);
-    } else {
-      await openFile(allFiles.find(item => item.id === node.id) || node);
-    }
-  };
-
   const handleAddNode = async (parentId, type) => {
     if (!isAdmin) return;
     const name = prompt(`请输入新${type === 'folder' ? '目录' : '文章'}的名称:`);
@@ -295,22 +244,8 @@ export default function Home() {
     const newId = generateId();
     await addNode(newId, name, type, parentId === 'root' ? null : parentId);
     await loadTreeData();
-  };
-
-  const handleDeleteNode = async (id, nodeName) => {
-    if (!isAdmin) return;
-    if (!confirm(`确定要删除 "${nodeName}" 吗？`)) return;
-    await deleteNode(id); await loadTreeData();
-    if (activeFileId === id) setActiveFileId(null);
-    if (activeFolderId === id) setActiveFolderId(null);
-  };
-
-  const handleRenameNode = async (id, oldName) => {
-    if (!isAdmin) return;
-    const newName = prompt('请输入新名称:', oldName);
-    if (!newName || newName === oldName) return;
-    await renameNode(id, newName); await loadTreeData();
-    if (activeFileId === id) setActiveTitle(newName);
+    if (parentId !== 'root') setActiveFolderId(parentId);
+    setActiveFileId(null);
   };
 
   const moveToRoot = async () => {
@@ -329,6 +264,12 @@ export default function Home() {
     setIsEditing(false);
   };
 
+  const openHome = () => {
+    setActiveFileId(null);
+    setActiveFolderId(null);
+    setIsEditing(false);
+  };
+
   const renderDocShortcut = (doc, icon = <FileText size={15} />) => (
     <button
       key={doc.id}
@@ -340,6 +281,33 @@ export default function Home() {
         <span className="block text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{doc.name}</span>
         <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{doc.path || '未记录路径'}</span>
       </span>
+    </button>
+  );
+
+  const renderSidebarDoc = (doc, icon = <FileText size={14} />) => (
+    <button
+      key={doc.id}
+      type="button"
+      onClick={() => openFile(allFiles.find(file => file.id === doc.id) || doc)}
+      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-sm hover:bg-gray-100 dark:hover:bg-zinc-800 transition ${activeFileId === doc.id ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}
+    >
+      <span className="text-gray-400 shrink-0">{icon}</span>
+      <span className="truncate">{doc.name}</span>
+    </button>
+  );
+
+  const renderSidebarFolder = (folder) => (
+    <button
+      key={folder.id}
+      type="button"
+      onClick={() => openFolder(allFolders.find(item => item.id === folder.id) || folder)}
+      className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-left text-sm hover:bg-gray-100 dark:hover:bg-zinc-800 transition ${activeFolderId === folder.id ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}
+    >
+      <span className="flex items-center gap-2 min-w-0">
+        <Folder size={14} className="text-gray-500 shrink-0" />
+        <span className="truncate">{folder.name}</span>
+      </span>
+      <span className="text-xs text-gray-400 shrink-0">{folder.children?.length || 0}</span>
     </button>
   );
 
@@ -420,11 +388,25 @@ export default function Home() {
             <button type="button" onClick={() => setActiveFolderId(null)} className="mb-4 inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
               <ChevronLeft size={16} /> 返回学习首页
             </button>
-            <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-2">目录浏览</p>
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{activeFolder.name}</h2>
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mt-2">
-              <MapPin size={14} />
-              <span className="truncate">{activeFolder.path}</span>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-2">目录浏览</p>
+                <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{activeFolder.name}</h2>
+                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 mt-2">
+                  <MapPin size={14} />
+                  <span className="truncate">{activeFolder.path}</span>
+                </div>
+              </div>
+              {isAdmin && (
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <button type="button" onClick={() => handleAddNode(activeFolder.id, 'file')} className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 transition">
+                    <FilePlus size={16} /> 新文章
+                  </button>
+                  <button type="button" onClick={() => handleAddNode(activeFolder.id, 'folder')} className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-200 dark:hover:bg-zinc-700 transition">
+                    <FolderPlus size={16} /> 新子目录
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -482,38 +464,86 @@ export default function Home() {
     );
   };
 
-  const renderTree = (nodes, level = 0) => {
-    return nodes.map((node) => (
-      <div key={node.id} style={{ paddingLeft: `${level * 8}px` }} className="mt-1">
-        <div className={`flex items-center justify-between px-2 py-1.5 hover:bg-gray-200 dark:hover:bg-zinc-800 rounded cursor-pointer text-sm group ${(activeFileId === node.id || activeFolderId === node.id) ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'} ${movingNode?.id === node.id ? 'opacity-50' : ''}`}>
-          <div className="flex items-center gap-2 overflow-hidden flex-1" onClick={() => handleItemClick(node)}>
-            {node.type === 'folder' ? (node.isExpanded ? <FolderOpen size={16} className="text-blue-500 shrink-0" /> : <Folder size={16} className="text-gray-500 shrink-0" />) : (<FileText size={16} className={`${activeFileId === node.id ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'} shrink-0`} />)}
-            <span className="truncate select-none">{node.name}</span>
+  const renderSearchResults = () => {
+    const query = searchQuery.trim().toLowerCase();
+    const matchedFolders = allFolders.filter(folder => folder.name.toLowerCase().includes(query));
+    const matchedFiles = allFiles.filter(file => file.name.toLowerCase().includes(query));
+
+    return (
+      <div className="h-full overflow-y-auto p-8 bg-white dark:bg-zinc-950">
+        <div className="max-w-6xl mx-auto">
+          <div className="mb-8">
+            <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-2">搜索</p>
+            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">“{searchQuery}”</h2>
+            <p className="text-gray-500 dark:text-gray-400 mt-2">
+              找到 {matchedFolders.length} 个目录，{matchedFiles.length} 篇文章
+            </p>
           </div>
-          {isAdmin && !movingNode && (
-            <div className="hidden group-hover:flex items-center gap-1 shrink-0 ml-2 bg-gray-200 dark:bg-zinc-800 pl-2 rounded">
-              {node.type === 'folder' && (
-                <><button onClick={(e) => { e.stopPropagation(); handleAddNode(node.id, 'file'); }} className="p-1 hover:bg-white dark:hover:bg-zinc-700 rounded text-green-600 dark:text-green-400"><FilePlus size={14} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); handleAddNode(node.id, 'folder'); }} className="p-1 hover:bg-white dark:hover:bg-zinc-700 rounded text-blue-600 dark:text-blue-400"><FolderPlus size={14} /></button></>
-              )}
-              <button onClick={(e) => { e.stopPropagation(); handleRenameNode(node.id, node.name); }} className="p-1 hover:bg-white dark:hover:bg-zinc-700 rounded text-gray-600 dark:text-gray-400"><Edit size={14} /></button>
-              <button onClick={(e) => { e.stopPropagation(); setMovingNode(node); }} className="p-1 hover:bg-white dark:hover:bg-zinc-700 rounded text-purple-600 dark:text-purple-400"><MoveRight size={14} /></button>
-              <button onClick={(e) => { e.stopPropagation(); handleDeleteNode(node.id, node.name); }} className="p-1 hover:bg-white dark:hover:bg-zinc-700 rounded text-red-500 dark:text-red-400"><Trash2 size={14} /></button>
-            </div>
+
+          {matchedFolders.length > 0 && (
+            <section className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <FolderOpen size={18} className="text-blue-500" />
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100">目录</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {matchedFolders.map(folder => (
+                  <button key={folder.id} type="button" onClick={() => openFolder(folder)} className="flex items-center justify-between gap-3 border border-gray-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <Folder size={17} className="text-blue-500 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{folder.name}</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{folder.path}</span>
+                      </span>
+                    </span>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
+
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <FileText size={18} className="text-green-600 dark:text-green-400" />
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">文章</h3>
+            </div>
+            {matchedFiles.length > 0 ? (
+              <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
+                {matchedFiles.map(file => (
+                  <button key={file.id} type="button" onClick={() => openFile(file)} className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+                    <span className="flex items-center gap-3 min-w-0">
+                      <FileText size={16} className="text-gray-400 shrink-0" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{file.name}</span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{file.path}</span>
+                      </span>
+                    </span>
+                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="border border-dashed border-gray-300 dark:border-zinc-700 rounded-lg px-4 py-8 text-sm text-gray-500 dark:text-gray-400">
+                没有匹配的文章。
+              </div>
+            )}
+          </section>
         </div>
-        {node.type === 'folder' && node.isExpanded && node.children && (<div>{renderTree(node.children, level + 1)}</div>)}
       </div>
-    ));
+    );
   };
 
   return (
     <div className="flex h-screen overflow-hidden bg-white dark:bg-zinc-950 text-black dark:text-zinc-100 transition-colors">
       
-      {/* === 左侧目录树区域 === */}
+      {/* === 左侧导航入口区域 === */}
       <div className="w-72 bg-gray-50 dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 flex flex-col select-none transition-colors">
-        <div className="p-4 pb-0">
+        <div className="p-4 border-b border-gray-200 dark:border-zinc-800">
           <h1 className="text-lg font-bold text-gray-800 dark:text-gray-100 tracking-wide">⚙️ PZP 知识库</h1>
+          <button type="button" onClick={openHome} className={`mt-4 w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm transition ${!activeFileId && !activeFolderId && !searchQuery ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-white text-gray-800 hover:bg-gray-100 dark:bg-zinc-800 dark:text-gray-200 dark:hover:bg-zinc-700'}`}>
+            <HomeIcon size={16} /> 学习首页
+          </button>
         </div>
         {movingNode && (
           <div className="px-4 py-2">
@@ -526,10 +556,58 @@ export default function Home() {
             </div>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto p-4 pt-2">{isLoading ? <p className="text-gray-400 text-sm">加载中...</p> : renderTree(filteredDirectories)}</div>
-        {isAdmin && !movingNode && (
-          <div className="p-4 pt-0">
-            <button onClick={() => handleAddNode('root', 'folder')} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600"><PlusCircle size={18} /><span>添加根目录</span></button>
+        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          {isLoading ? (
+            <p className="text-gray-400 text-sm">加载中...</p>
+          ) : (
+            <>
+              <section>
+                <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                  <Clock size={14} /> 最近打开
+                </div>
+                <div className="space-y-1">
+                  {recentDocs.length > 0 ? recentDocs.slice(0, 5).map(doc => renderSidebarDoc(doc, <Clock size={14} />)) : (
+                    <p className="px-2 py-1.5 text-xs text-gray-400">还没有打开记录</p>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                  <Star size={14} /> 收藏
+                </div>
+                <div className="space-y-1">
+                  {favoriteDocs.length > 0 ? favoriteDocs.slice(0, 6).map(doc => renderSidebarDoc(doc, <Star size={14} />)) : (
+                    <p className="px-2 py-1.5 text-xs text-gray-400">收藏后会出现在这里</p>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                    <Folder size={14} /> 目录
+                  </div>
+                  {isAdmin && !movingNode && (
+                    <button type="button" onClick={() => handleAddNode('root', 'folder')} className="p-1 rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-zinc-800" title="添加根目录">
+                      <PlusCircle size={15} />
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  {rootFolders.length > 0 ? rootFolders.map(renderSidebarFolder) : (
+                    <p className="px-2 py-1.5 text-xs text-gray-400">暂无根目录</p>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+        </div>
+        {isAdmin && activeFolder && !movingNode && (
+          <div className="p-4 border-t border-gray-200 dark:border-zinc-800">
+            <button onClick={() => handleAddNode(activeFolder.id, 'file')} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600">
+              <FilePlus size={18} /><span>在当前目录新建文章</span>
+            </button>
           </div>
         )}
       </div>
@@ -565,7 +643,7 @@ export default function Home() {
 
         {/* 文章阅读/编辑区 */}
         <div id="article-scroll-area" onScroll={saveReadingPosition} className="flex-1 min-h-0 overflow-y-auto bg-white dark:bg-zinc-950 transition-colors">
-          {!activeFileId ? (activeFolder ? renderFolderPanel() : renderLearningHome()) : (
+          {searchQuery.trim() ? renderSearchResults() : !activeFileId ? (activeFolder ? renderFolderPanel() : renderLearningHome()) : (
             <div className="p-8">
               <div className="flex justify-between items-start mb-6 border-b dark:border-zinc-800 pb-4">
                 <div>
