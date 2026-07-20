@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect,useMemo } from 'react';
+import { useState, useEffect,useMemo,useRef } from 'react';
 import { 
   Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, 
   Edit2, Save, FilePlus, FolderPlus, MoveRight,
@@ -40,6 +40,8 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedFolderIds, setExpandedFolderIds] = useState([]);
   const [moveTargetQuery, setMoveTargetQuery] = useState('');
+  const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
+  const lastSavedContentRef = useRef('');
   
   const [theme, setTheme] = useState('light');
   const [recentDocs, setRecentDocs] = useState([]);
@@ -140,7 +142,36 @@ export default function Home() {
     localStorage.setItem(READING_POSITIONS_KEY, JSON.stringify(positions));
   };
 
+  useEffect(() => {
+    if (!isEditing || !activeFileId) return;
+    if (markdownContent === lastSavedContentRef.current) {
+      setAutoSaveStatus('saved');
+      return;
+    }
+
+    setAutoSaveStatus('pending');
+    const timer = setTimeout(async () => {
+      setAutoSaveStatus('saving');
+      const res = await updateDocument(activeFileId, markdownContent);
+      if (res.success) {
+        lastSavedContentRef.current = markdownContent;
+        setAutoSaveStatus('saved');
+      } else {
+        setAutoSaveStatus('error');
+      }
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [isEditing, activeFileId, markdownContent]);
+
   const isFavorite = activeFile ? favoriteDocs.some(doc => doc.id === activeFile.id) : false;
+  const autoSaveLabel = {
+    idle: '',
+    pending: '等待自动保存',
+    saving: '自动保存中...',
+    saved: '已保存',
+    error: '自动保存失败'
+  }[autoSaveStatus] || '';
 
   const loadTreeData = async () => {
     setIsLoading(true);
@@ -237,6 +268,8 @@ export default function Home() {
     const res = await getDocument(file.id);
     if (res.success) {
       setMarkdownContent(res.content);
+      lastSavedContentRef.current = res.content;
+      setAutoSaveStatus('saved');
       restoreReadingPosition(file.id);
     }
   };
@@ -280,8 +313,16 @@ export default function Home() {
   };
 
   const handleSave = async () => {
-    await updateDocument(activeFileId, markdownContent);
-    alert("云端保存成功！"); setIsEditing(false);
+    const res = await updateDocument(activeFileId, markdownContent);
+    if (res.success) {
+      lastSavedContentRef.current = markdownContent;
+      setAutoSaveStatus('saved');
+      alert("云端保存成功！");
+      setIsEditing(false);
+    } else {
+      setAutoSaveStatus('error');
+      alert(`保存失败：${res.error || '未知错误'}`);
+    }
   };
 
   const openFolder = (folder) => {
@@ -821,6 +862,11 @@ export default function Home() {
                   {isUploading && <span className="text-sm text-blue-500 mt-2 block animate-pulse">图片拼命上传中，请稍候...</span>}
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
+                  {isEditing && autoSaveLabel && (
+                    <span className={`flex items-center px-2 text-xs ${autoSaveStatus === 'error' ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
+                      {autoSaveLabel}
+                    </span>
+                  )}
                   <button onClick={toggleFavoriteDoc} className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition ${isFavorite ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>
                     <Star size={16} /> {isFavorite ? '已收藏' : '收藏'}
                   </button>
