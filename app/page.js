@@ -10,7 +10,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import nextDynamic from 'next/dynamic'; 
-import { getDirectories, getDocument, addNode, updateDocument, moveNode, renameNode, deleteNode, login, logout, getSessionRole } from './actions';
+import { getDirectories, getDocument, addNode, updateDocument, moveNode, renameNode, deleteNode, searchDocuments, login, logout, getSessionRole } from './actions';
 
 // === 新增：引入数学公式和 HTML 解析插件 ===
 import remarkMath from 'remark-math';
@@ -75,6 +75,7 @@ export default function Home() {
   const [dropTargetId, setDropTargetId] = useState(null);
   const [menuState, setMenuState] = useState(null);
   const [toast, setToast] = useState('');
+  const [contentHits, setContentHits] = useState([]);
   
   const [theme, setTheme] = useState('light');
   const [recentDocs, setRecentDocs] = useState([]);
@@ -279,6 +280,20 @@ export default function Home() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isEditing, markdownContent, autoSpacingEnabled, activeFileId]);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setContentHits([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const res = await searchDocuments(q);
+      if (!cancelled && res && res.success) setContentHits(res.data || []);
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [searchQuery]);
 
   if (!userRole) {
     return <div className="h-screen bg-white dark:bg-zinc-950" />;
@@ -516,58 +531,64 @@ export default function Home() {
 
     const query = moveTargetQuery.trim().toLowerCase();
     const candidateFolders = allFolders
+      .filter(folder => folder.id !== movingNode.id && !isDescendant(folder.id, movingNode.id))
       .filter(folder => !query || folder.name.toLowerCase().includes(query) || folder.path.toLowerCase().includes(query))
-      .slice(0, 30);
+      .slice(0, 60);
 
     return (
-      <section className="mb-8 border border-blue-200 dark:border-blue-900/60 rounded-lg bg-blue-50/70 dark:bg-blue-950/20 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between mb-4">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">移动文章</p>
-            <p className="text-sm text-blue-700/80 dark:text-blue-200/70 truncate">{movingNode.name}</p>
+      <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/25 p-4 pt-[12vh]" onMouseDown={cancelMovingFile}>
+        <div
+          className="w-full max-w-[560px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+            <div className="min-w-0">
+              <p className="text-[11.5px] font-medium uppercase tracking-wide text-zinc-400">移动到</p>
+              <p className="mt-0.5 truncate text-[14px] font-medium text-zinc-900 dark:text-zinc-50">{movingNode.name}</p>
+            </div>
+            <button type="button" onClick={cancelMovingFile} className="shrink-0 rounded-md px-2 py-1 text-[12.5px] text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">Esc</button>
           </div>
-          <button type="button" onClick={cancelMovingFile} className="self-start px-3 py-1.5 rounded-md text-sm bg-white text-gray-700 hover:bg-gray-100 dark:bg-zinc-900 dark:text-gray-200 dark:hover:bg-zinc-800">
-            取消
-          </button>
-        </div>
 
-        <div className="relative mb-3">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={moveTargetQuery}
-            onChange={(event) => setMoveTargetQuery(event.target.value)}
-            placeholder="搜索目标目录..."
-            className="w-full pl-9 pr-3 py-2 rounded-md border border-blue-200 dark:border-blue-900/70 bg-white dark:bg-zinc-950 text-sm focus:outline-none focus:border-blue-500"
-          />
-        </div>
+          <div className="relative px-5 py-3">
+            <Search size={15} className="absolute left-8 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input
+              type="text"
+              autoFocus
+              value={moveTargetQuery}
+              onChange={(event) => setMoveTargetQuery(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); cancelMovingFile(); } }}
+              placeholder="搜索目标目录…"
+              className="w-full rounded-md border border-zinc-200 bg-transparent py-2 pl-8 pr-3 text-[13px] outline-none focus:border-blue-400 dark:border-zinc-700"
+            />
+          </div>
 
-        <div className="max-h-72 overflow-y-auto border border-blue-100 dark:border-blue-900/50 rounded-lg divide-y divide-blue-100 dark:divide-blue-900/50 bg-white dark:bg-zinc-950">
-          {candidateFolders.length > 0 ? candidateFolders.map(folder => {
-            const isCurrentFolder = movingNode.parentKey === folder.id || movingNode.parent_id === folder.id;
-            return (
-              <button
-                key={folder.id}
-                type="button"
-                disabled={isCurrentFolder}
-                onClick={() => confirmMoveFile(folder)}
-                className={`w-full flex items-center justify-between gap-3 px-4 py-3 text-left transition ${isCurrentFolder ? 'cursor-not-allowed text-gray-400 dark:text-gray-600' : 'hover:bg-blue-50 dark:hover:bg-zinc-900 text-gray-800 dark:text-gray-100'}`}
-              >
-                <span className="flex items-center gap-3 min-w-0">
-                  <Folder size={16} className="text-blue-500 shrink-0" />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium truncate">{folder.name}</span>
-                    <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{folder.path}</span>
+          <div className="max-h-[46vh] divide-y divide-zinc-100 overflow-y-auto border-t border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800">
+            {candidateFolders.length > 0 ? candidateFolders.map(folder => {
+              const isCurrentFolder = movingNode.parentKey === folder.id || movingNode.parent_id === folder.id;
+              return (
+                <button
+                  key={folder.id}
+                  type="button"
+                  disabled={isCurrentFolder}
+                  onClick={() => confirmMoveFile(folder)}
+                  className={cx('flex w-full items-center justify-between gap-3 px-5 py-2.5 text-left transition', isCurrentFolder ? 'cursor-not-allowed opacity-55' : 'hover:bg-blue-50 dark:hover:bg-zinc-800')}
+                >
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <Folder size={14} className="shrink-0 text-blue-500" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13.5px] text-zinc-800 dark:text-zinc-100">{folder.name}</span>
+                      <span className="block truncate text-[11.5px] text-zinc-400">{folder.path}</span>
+                    </span>
                   </span>
-                </span>
-                <span className="text-xs text-gray-500 shrink-0">{isCurrentFolder ? '当前位置' : '移动到这里'}</span>
-              </button>
-            );
-          }) : (
-            <p className="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">没有匹配的目录。</p>
-          )}
+                  <span className="shrink-0 text-[11.5px] text-zinc-400">{isCurrentFolder ? '当前位置' : '移到这里'}</span>
+                </button>
+              );
+            }) : (
+              <p className="px-5 py-8 text-center text-[13px] text-zinc-400">没有匹配的目录。</p>
+            )}
+          </div>
         </div>
-      </section>
+      </div>
     );
   };
 
@@ -724,7 +745,6 @@ export default function Home() {
             </div>
           </div>
 
-          {renderMoveTargetPanel()}
 
           {childFolders.length > 0 && (
             <section className="mb-8">
@@ -790,7 +810,6 @@ export default function Home() {
             </p>
           </div>
 
-          {renderMoveTargetPanel()}
 
           {matchedFolders.length > 0 && (
             <section className="mb-8">
@@ -943,7 +962,7 @@ export default function Home() {
     }
     if (activeFolderId === node.id) setActiveFolderId(null);
     await loadTreeData();
-    showToast('已删除：' + node.name);
+    showToast(isFolder ? '已删除目录：' + node.name + (res.deleted ? '（连同 ' + (res.deleted - 1) + ' 项）' : '') : '已删除：' + node.name);
   };
 
   const isDescendant = (candidateId, ancestorId) => {
@@ -1048,6 +1067,7 @@ export default function Home() {
         onClick={(event) => event.stopPropagation()}
       >
         {item('重命名', <Pencil size={13} />, () => beginRename(node))}
+        {item('移动到…', <MoveRight size={13} />, () => startMovingFile(node))}
         {node.type === 'folder' && item('新建子目录', <FolderPlus size={13} />, () => handleCreateNode(node.id, 'folder'))}
         {node.type === 'folder' && item('新建文章', <FilePlus size={13} />, () => handleCreateNode(node.id, 'file'))}
         {item('删除', <Trash2 size={13} />, () => handleDeleteNode(node), true)}
@@ -1316,7 +1336,6 @@ export default function Home() {
           )}
         </div>
 
-        <div className="mt-8">{renderMoveTargetPanel()}</div>
 
         {childFolders.length > 0 && (
           <section className="mt-4">
@@ -1358,7 +1377,7 @@ export default function Home() {
     return (
       <div className="mx-auto max-w-[900px] px-8 py-12">
         <h1 className="text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">“{searchQuery}”</h1>
-        <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">找到 {matchedFolders.length} 个目录，{matchedFiles.length} 篇文章。</p>
+        <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">找到 {matchedFolders.length} 个目录，{matchedFiles.length} 篇文章{contentHits.length > 0 ? '，另有 ' + contentHits.length + ' 篇正文命中' : ''}。</p>
 
         {matchedFolders.length > 0 && (
           <section className="mt-8">
@@ -1387,6 +1406,28 @@ export default function Home() {
             <p className="rounded-lg border border-dashed border-zinc-300 px-4 py-8 text-center text-[13px] text-zinc-400 dark:border-zinc-800">没有匹配的文章。</p>
           )}
         </section>
+
+        {contentHits.length > 0 && (
+          <section className="mt-10">
+            <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">正文命中 · {contentHits.length}</h2>
+            <div className="divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+              {contentHits.filter(hit => !matchedFiles.some(f => f.id === hit.id)).map(hit => {
+                const file = allFiles.find(item => item.id === hit.id);
+                return (
+                  <button
+                    key={hit.id}
+                    type="button"
+                    onClick={() => file && openFile(file)}
+                    className="block w-full px-4 py-3 text-left transition hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                  >
+                    <span className="block truncate text-[13.5px] font-medium text-zinc-800 dark:text-zinc-100">{hit.name}</span>
+                    <span className="mt-1 block text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">{String(hit.snippet || '').replace(/\s+/g, ' ').trim()}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
     );
   };
@@ -1484,6 +1525,7 @@ export default function Home() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {renderNodeMenu()}
+      {renderMoveTargetPanel()}
       {toast && (
         <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-zinc-900 px-3.5 py-2 text-[13px] text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900">
           {toast}

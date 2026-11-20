@@ -86,14 +86,48 @@ export async function addNode(id, name, type, parentId) {
   }
 }
 
-// 4. 删除节点
+// 4. 删除节点：目录连同所有子孙目录、子孙文章一起删（递归 CTE）
 export async function deleteNode(id) {
   try {
     if (!(await isOwner(sql))) return DENIED;
-    // 简单起见，这里只删当前节点（如果是文件夹，里面的子文件在实际开发中最好用外键级联删除）
-    await sql`DELETE FROM directories WHERE id = ${id} OR parent_id = ${id};`;
-    await sql`DELETE FROM documents WHERE id = ${id};`;
-    return { success: true };
+    await sql`
+      WITH RECURSIVE subtree AS (
+        SELECT id FROM directories WHERE id = ${id}
+        UNION ALL
+        SELECT d.id FROM directories d INNER JOIN subtree s ON d.parent_id = s.id
+      )
+      DELETE FROM documents WHERE id IN (SELECT id FROM subtree);
+    `;
+    const result = await sql`
+      WITH RECURSIVE subtree AS (
+        SELECT id FROM directories WHERE id = ${id}
+        UNION ALL
+        SELECT d.id FROM directories d INNER JOIN subtree s ON d.parent_id = s.id
+      )
+      DELETE FROM directories WHERE id IN (SELECT id FROM subtree);
+    `;
+    return { success: true, deleted: result.rowCount ?? 0 };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// 4b. 搜索正文：命中返回所属文章 + 命中位置上下文
+export async function searchDocuments(query, limit = 40) {
+  try {
+    const q = String(query || '').trim();
+    if (!q) return { success: true, data: [] };
+    const like = '%' + q.replace(/[\\%_]/g, (m) => '\\' + m) + '%';
+    const { rows } = await sql`
+      SELECT dir.id, dir.name, dir.parent_id,
+             substring(d.content from greatest(1, strpos(lower(d.content), lower(${q})) - 30) for 150) AS snippet
+      FROM documents d
+      INNER JOIN directories dir ON dir.id = d.id
+      WHERE d.content ILIKE ${like}
+      ORDER BY d.updated_at DESC NULLS LAST
+      LIMIT ${limit};
+    `;
+    return { success: true, data: rows };
   } catch (error) {
     return { success: false, error: error.message };
   }
