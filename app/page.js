@@ -4,13 +4,13 @@ export const dynamic = 'force-dynamic';
 import { useState, useEffect,useMemo,useRef } from 'react';
 import { 
   Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, 
-  Edit2, Save, FilePlus, FolderPlus, MoveRight,
+  Edit2, Save, FilePlus, FolderPlus, MoveRight, Trash2, Pencil, GripVertical, MoreHorizontal,
   Sun, Moon, Clock, Star, Home as HomeIcon, ChevronLeft, ChevronRight, MapPin
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import nextDynamic from 'next/dynamic'; 
-import { getDirectories, getDocument, addNode, updateDocument, moveNode, login, logout, getSessionRole } from './actions';
+import { getDirectories, getDocument, addNode, updateDocument, moveNode, renameNode, deleteNode, login, logout, getSessionRole } from './actions';
 
 // === 新增：引入数学公式和 HTML 解析插件 ===
 import remarkMath from 'remark-math';
@@ -68,6 +68,12 @@ export default function Home() {
   const [autoSpacingEnabled, setAutoSpacingEnabled] = useState(true);
   const lastSavedContentRef = useRef('');
   const [navOpen, setNavOpen] = useState({});
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [dragId, setDragId] = useState(null);
+  const [dropTargetId, setDropTargetId] = useState(null);
+  const [menuState, setMenuState] = useState(null);
+  const [toast, setToast] = useState('');
   
   const [theme, setTheme] = useState('light');
   const [recentDocs, setRecentDocs] = useState([]);
@@ -246,6 +252,18 @@ export default function Home() {
   const isAdmin = userRole === 'admin';
 
   // 会话还没问出来时先给个空架子，避免闪一下登录页
+  // 点击任意处关闭右键菜单（必须放在早返回之前，否则 hooks 顺序会变）
+  useEffect(() => {
+    if (!menuState) return;
+    const close = () => setMenuState(null);
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [menuState]);
+
   if (!userRole) {
     return <div className="h-screen bg-white dark:bg-zinc-950" />;
   }
@@ -862,34 +880,264 @@ export default function Home() {
     },
   };
 
+  // ===== 左栏树操作：提示 / 就地重命名 / 删除 / 新建 / 拖拽 / 右键菜单 =====
+  const showToast = (message) => {
+    setToast(message);
+    window.clearTimeout(showToast._timer);
+    showToast._timer = window.setTimeout(() => setToast(''), 2600);
+  };
+
+  const beginRename = (node) => {
+    if (!isAdmin || !node) return;
+    setMenuState(null);
+    setRenamingId(node.id);
+    setRenameValue(node.name);
+  };
+
+  const cancelRename = () => {
+    setRenamingId(null);
+    setRenameValue('');
+  };
+
+  const submitRename = async (node) => {
+    const nextName = renameValue.trim();
+    if (!nextName || nextName === node.name) {
+      cancelRename();
+      return;
+    }
+    const res = await renameNode(node.id, nextName);
+    if (!res?.success) {
+      showToast('重命名失败：' + (res?.error || '未知错误'));
+      return;
+    }
+    cancelRename();
+    await loadTreeData();
+    if (activeFileId === node.id) setActiveTitle(nextName);
+    showToast('已改名：' + nextName);
+  };
+
+  const handleDeleteNode = async (node) => {
+    if (!isAdmin || !node) return;
+    setMenuState(null);
+    const isFolder = node.type === 'folder';
+    const confirmed = window.confirm(
+      isFolder
+        ? '删除目录「' + node.name + '」？里面的子目录和文章会一起删掉，不能撤销。'
+        : '删除文章「' + node.name + '」？正文会一起删掉，不能撤销。'
+    );
+    if (!confirmed) return;
+    const res = await deleteNode(node.id);
+    if (!res?.success) {
+      showToast('删除失败：' + (res?.error || '未知错误'));
+      return;
+    }
+    if (activeFileId === node.id) {
+      setActiveFileId(null);
+      setIsEditing(false);
+    }
+    if (activeFolderId === node.id) setActiveFolderId(null);
+    await loadTreeData();
+    showToast('已删除：' + node.name);
+  };
+
+  const isDescendant = (candidateId, ancestorId) => {
+    if (!candidateId || !ancestorId || candidateId === ancestorId) return false;
+    let cursor = allFolders.find(folder => folder.id === candidateId);
+    let guard = 0;
+    while (cursor && cursor.parent_id && guard < 40) {
+      if (cursor.parent_id === ancestorId) return true;
+      cursor = allFolders.find(folder => folder.id === cursor.parent_id);
+      guard += 1;
+    }
+    return false;
+  };
+
+  const handleDropOn = async (targetFolder) => {
+    const dragged = dragId ? (allFolders.find(f => f.id === dragId) || allFiles.find(f => f.id === dragId)) : null;
+    setDropTargetId(null);
+    if (!isAdmin || !dragged || !targetFolder) { setDragId(null); return; }
+    if (dragged.id === targetFolder.id) { setDragId(null); return; }
+    if (dragged.type === 'folder' && isDescendant(targetFolder.id, dragged.id)) {
+      showToast('不能把目录移动到它自己的子目录里');
+      setDragId(null);
+      return;
+    }
+    if (dragged.parent_id === targetFolder.id) {
+      showToast('它已经在「' + targetFolder.name + '」里了');
+      setDragId(null);
+      return;
+    }
+    const res = await moveNode(dragged.id, targetFolder.id);
+    setDragId(null);
+    if (!res?.success) {
+      showToast('移动失败：' + (res?.error || '未知错误'));
+      return;
+    }
+    await loadTreeData();
+    showToast('已移动到「' + targetFolder.name + '」');
+  };
+
+  const handleCreateNode = async (parentId, type) => {
+    if (!isAdmin) return;
+    setMenuState(null);
+    const newId = generateId();
+    const defaultName = type === 'folder' ? '新目录' : '新文章';
+    const res = await addNode(newId, defaultName, type, parentId === 'root' ? null : parentId);
+    if (!res?.success) {
+      showToast('新建失败：' + (res?.error || '未知错误'));
+      return;
+    }
+    if (parentId !== 'root') {
+      setNavOpen(prev => ({ ...prev, [parentId]: true }));
+      setActiveFolderId(parentId);
+      setActiveFileId(null);
+    }
+    await loadTreeData();
+    setRenamingId(newId);
+    setRenameValue(defaultName);
+  };
+
+  const openNodeMenu = (event, node) => {
+    if (!isAdmin || !node) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenuState({ id: node.id, node, x: rect.left, y: rect.bottom + 4 });
+  };
+
+
+  const renderNodeMenu = () => {
+    if (!menuState) return null;
+    const node = menuState.node;
+    const item = (label, icon, onClick, danger) => (
+      <button
+        key={label}
+        type="button"
+        onClick={(event) => { event.stopPropagation(); onClick(); }}
+        className={cx(
+          'flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition',
+          danger
+            ? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30'
+            : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'
+        )}
+      >
+        {icon}
+        {label}
+      </button>
+    );
+    return (
+      <div
+        className="fixed z-50 w-[168px] overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+        style={{ left: menuState.x, top: menuState.y }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {item('重命名', <Pencil size={13} />, () => beginRename(node))}
+        {node.type === 'folder' && item('新建子目录', <FolderPlus size={13} />, () => handleCreateNode(node.id, 'folder'))}
+        {node.type === 'folder' && item('新建文章', <FilePlus size={13} />, () => handleCreateNode(node.id, 'file'))}
+        {item('删除', <Trash2 size={13} />, () => handleDeleteNode(node), true)}
+      </div>
+    );
+  };
+
   const toggleNav = (id, open) => setNavOpen(prev => ({ ...prev, [id]: !open }));
 
+  const treeInputProps = (node) => ({
+    autoFocus: true,
+    value: renameValue,
+    onChange: (event) => setRenameValue(event.target.value),
+    onBlur: () => submitRename(node),
+    onKeyDown: (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); submitRename(node); }
+      if (event.key === 'Escape') { event.preventDefault(); cancelRename(); }
+    },
+    onClick: (event) => event.stopPropagation(),
+    onDoubleClick: (event) => event.stopPropagation()
+  });
+
   const renderNavTree = (nodes, depth = 0) => nodes.map(node => {
-    if (node.type === 'file') {
+    const isFolder = node.type === 'folder';
+    const dropping = dropTargetId === node.id;
+    const dragProps = isAdmin && renamingId !== node.id ? {
+      draggable: true,
+      onDragStart: (event) => {
+        setDragId(node.id);
+        event.dataTransfer.effectAllowed = 'move';
+        try { event.dataTransfer.setData('text/plain', node.id); } catch (e) {}
+      },
+      onDragEnd: () => { setDragId(null); setDropTargetId(null); }
+    } : {};
+    const dropProps = isFolder && isAdmin ? {
+      onDragOver: (event) => {
+        if (!dragId || dragId === node.id) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        if (dropTargetId !== node.id) setDropTargetId(node.id);
+      },
+      onDragLeave: () => { if (dropTargetId === node.id) setDropTargetId(null); },
+      onDrop: (event) => { event.preventDefault(); event.stopPropagation(); handleDropOn(node); }
+    } : {};
+
+    if (!isFolder) {
       const active = activeFileId === node.id;
       return (
-        <button
+        <div
           key={node.id}
-          type="button"
-          onClick={() => openFile(node)}
-          style={{ paddingLeft: 8 + depth * 13 }}
-          className={cx(
-            'flex w-full items-center gap-2 rounded-md py-[5px] pr-2 text-left text-[13.5px] leading-5 transition',
-            active
-              ? 'bg-blue-50 font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
-              : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/60'
-          )}
+          {...dragProps}
+          onContextMenu={(event) => openNodeMenu(event, node)}
+          className={cx('group flex items-center rounded-md transition', dragId === node.id && 'opacity-40')}
         >
-          <FileText size={13} className={cx('shrink-0', active ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-400')} />
-          <span className="truncate">{node.name}</span>
-        </button>
+          {renamingId === node.id ? (
+            <input
+              {...treeInputProps(node)}
+              style={{ marginLeft: 8 + depth * 13 }}
+              className="min-w-0 flex-1 rounded border border-blue-400 bg-white px-1.5 py-[3px] text-[13.5px] outline-none dark:bg-zinc-900"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => openFile(node)}
+              onDoubleClick={(event) => { event.stopPropagation(); beginRename(node); }}
+              style={{ paddingLeft: 8 + depth * 13 }}
+              className={cx(
+                'flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pr-2 text-left text-[13.5px] leading-5 transition',
+                active
+                  ? 'bg-blue-50 font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
+                  : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/60'
+              )}
+            >
+              <FileText size={13} className={cx('shrink-0', active ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-400')} />
+              <span className="truncate">{node.name}</span>
+              {isAdmin && (
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(event) => openNodeMenu(event, node)}
+                  className="ml-auto shrink-0 rounded p-0.5 text-zinc-300 opacity-0 transition hover:text-zinc-600 group-hover:opacity-100 dark:text-zinc-600 dark:hover:text-zinc-300"
+                >
+                  <MoreHorizontal size={14} />
+                </span>
+              )}
+            </button>
+          )}
+        </div>
       );
     }
+
     const open = navOpen[node.id] !== undefined ? navOpen[node.id] : depth < 2;
     const active = activeFolderId === node.id;
     return (
       <div key={node.id}>
-        <div className="flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60">
+        <div
+          {...dragProps}
+          {...dropProps}
+          onContextMenu={(event) => openNodeMenu(event, node)}
+          className={cx(
+            'group flex items-center rounded-md transition',
+            dropping && 'bg-blue-100 ring-1 ring-inset ring-blue-400 dark:bg-blue-900/40',
+            !dropping && 'hover:bg-zinc-100 dark:hover:bg-zinc-800/60',
+            dragId === node.id && 'opacity-40'
+          )}
+        >
           <button
             type="button"
             onClick={() => toggleNav(node.id, open)}
@@ -899,16 +1147,36 @@ export default function Home() {
           >
             <ChevronRight size={13} className={cx('transition-transform', open && 'rotate-90')} />
           </button>
-          <button
-            type="button"
-            onClick={() => openFolder(allFolders.find(item => item.id === node.id) || node)}
-            className={cx(
-              'min-w-0 flex-1 truncate py-[5px] pr-2 text-left text-[13.5px] leading-5',
-              active ? 'font-medium text-blue-700 dark:text-blue-300' : 'text-zinc-700 dark:text-zinc-300'
-            )}
-          >
-            {node.name}
-          </button>
+          {renamingId === node.id ? (
+            <input
+              {...treeInputProps(node)}
+              className="min-w-0 flex-1 rounded border border-blue-400 bg-white px-1.5 py-[3px] text-[13.5px] outline-none dark:bg-zinc-900"
+            />
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => openFolder(allFolders.find(item => item.id === node.id) || node)}
+                onDoubleClick={(event) => { event.stopPropagation(); beginRename(node); }}
+                className={cx(
+                  'min-w-0 flex-1 truncate py-[5px] pr-2 text-left text-[13.5px] leading-5',
+                  active ? 'font-medium text-blue-700 dark:text-blue-300' : 'text-zinc-700 dark:text-zinc-300'
+                )}
+              >
+                {node.name}
+              </button>
+              {isAdmin && (
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  onClick={(event) => openNodeMenu(event, node)}
+                  className="mr-1 shrink-0 rounded p-0.5 text-zinc-300 opacity-0 transition hover:text-zinc-600 group-hover:opacity-100 dark:text-zinc-600 dark:hover:text-zinc-300"
+                >
+                  <MoreHorizontal size={14} />
+                </span>
+              )}
+            </>
+          )}
         </div>
         {open && node.children && node.children.length > 0 && renderNavTree(node.children, depth + 1)}
       </div>
@@ -1172,6 +1440,12 @@ export default function Home() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {renderNodeMenu()}
+      {toast && (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-zinc-900 px-3.5 py-2 text-[13px] text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900">
+          {toast}
+        </div>
+      )}
       {loginDialog}
       <header className="z-30 flex h-14 shrink-0 items-center gap-4 border-b border-zinc-200 px-5 dark:border-zinc-800">
         <button type="button" onClick={openHome} className="flex shrink-0 items-center gap-2">
