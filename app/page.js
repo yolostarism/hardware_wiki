@@ -790,69 +790,6 @@ export default function Home() {
     );
   };
 
-  const renderSearchResults = () => {
-    const query = searchQuery.trim().toLowerCase();
-    const matchedFolders = allFolders.filter(folder =>
-      folder.name.toLowerCase().includes(query) || folder.path.toLowerCase().includes(query)
-    );
-    const matchedFiles = allFiles.filter(file =>
-      file.name.toLowerCase().includes(query) || file.path.toLowerCase().includes(query)
-    );
-
-    return (
-      <div className="h-full overflow-y-auto p-8 bg-white dark:bg-zinc-950">
-        <div className="max-w-6xl mx-auto">
-          <div className="mb-8">
-            <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-2">搜索</p>
-            <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">“{searchQuery}”</h2>
-            <p className="text-gray-500 dark:text-gray-400 mt-2">
-              找到 {matchedFolders.length} 个目录，{matchedFiles.length} 篇文章；可按名称或路径匹配。
-            </p>
-          </div>
-
-
-          {matchedFolders.length > 0 && (
-            <section className="mb-8">
-              <div className="flex items-center gap-2 mb-3">
-                <FolderOpen size={18} className="text-blue-500" />
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100">目录</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {matchedFolders.map(folder => (
-                  <button key={folder.id} type="button" onClick={() => openFolder(folder)} className="flex items-center justify-between gap-3 border border-gray-200 dark:border-zinc-800 rounded-lg px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
-                    <span className="flex items-center gap-3 min-w-0">
-                      <Folder size={17} className="text-blue-500 shrink-0" />
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{folder.name}</span>
-                        <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{folder.path}</span>
-                      </span>
-                    </span>
-                    <ChevronRight size={16} className="text-gray-400 shrink-0" />
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
-
-          <section>
-            <div className="flex items-center gap-2 mb-3">
-              <FileText size={18} className="text-green-600 dark:text-green-400" />
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100">文章</h3>
-            </div>
-            {matchedFiles.length > 0 ? (
-              <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
-                {matchedFiles.map(file => renderArticleRow(file))}
-              </div>
-            ) : (
-              <div className="border border-dashed border-gray-300 dark:border-zinc-700 rounded-lg px-4 py-8 text-sm text-gray-500 dark:text-gray-400">
-                没有匹配的文章。
-              </div>
-            )}
-          </section>
-        </div>
-      </div>
-    );
-  };
 
 
   // ===== Fumadocs 式三栏渲染层 =====
@@ -1456,8 +1393,18 @@ export default function Home() {
               Auto spacing {autoSpacingEnabled ? 'ON' : 'OFF'}
             </button>
           )}
+          {isAdmin && activeFile && !isEditing && (
+            <button type="button" onClick={() => startMovingFile(activeFile)} className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 py-1.5 text-[12.5px] text-zinc-600 transition hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900">
+              <MoveRight size={13} /> 移动
+            </button>
+          )}
+          {isAdmin && activeFile && !isEditing && (
+            <button type="button" onClick={() => handleDeleteNode(activeFile)} title="删除这篇文章" className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 px-2 py-1.5 text-[12.5px] text-zinc-500 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-red-900 dark:hover:bg-red-950/30">
+              <Trash2 size={13} />
+            </button>
+          )}
           {isAdmin && (
-            <button type="button" onClick={() => (isEditing ? handleSave() : setIsEditing(true))} className={cx('ml-auto inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] transition', isEditing ? 'bg-green-600 text-white' : 'border border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300')}>
+            <button type="button" onClick={() => (isEditing ? handleSave() : setIsEditing(true))} className={cx(isEditing ? 'ml-auto' : '', 'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] transition', isEditing ? 'bg-green-600 text-white' : 'border border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300')}>
               {isEditing ? <><Save size={13} /> 保存</> : <><Edit2 size={13} /> 编辑</>}
             </button>
           )}
