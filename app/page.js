@@ -1284,7 +1284,6 @@ export default function Home() {
           <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
             <div className="mb-1 flex items-center gap-2 text-[12.5px] text-zinc-500 dark:text-zinc-400">
               <span>知识分布</span>
-              <span className="ml-auto text-[11.5px] text-zinc-400 dark:text-zinc-500">大圈 = 分类篇数，小点 = 子类</span>
             </div>
             {renderKnowledgeMap(categories)}
           </div>
@@ -1293,7 +1292,6 @@ export default function Home() {
             <div className="rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
               <div className="mb-1 flex items-center gap-2 text-[12.5px] text-zinc-500 dark:text-zinc-400">
                 <span>最近更新</span>
-                <span className="ml-auto text-[11.5px] text-zinc-400 dark:text-zinc-500">按正文改动时间</span>
               </div>
               <div className="flex flex-col">
                 {recent.length === 0 && <p className="py-4 text-[13px] text-zinc-400">还没有写过正文</p>}
@@ -1313,7 +1311,7 @@ export default function Home() {
 
             {thin.length > 0 && (
               <div className="mt-4 rounded-xl border border-dashed border-zinc-200 px-4 py-3 dark:border-zinc-800">
-                <div className="mb-2 text-[12.5px] text-zinc-500 dark:text-zinc-400">{thin.length} 篇只有标题、正文待写</div>
+                <div className="mb-2 text-[12px] tabular-nums text-zinc-400 dark:text-zinc-500">待写 {thin.length}</div>
                 <div className="flex flex-wrap gap-1.5">
                   {thin.map(item => {
                     const file = allFiles.find(f => f.id === item.id);
@@ -1328,10 +1326,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="mt-8 flex items-baseline gap-2.5">
-          <h2 className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">分类</h2>
-          <em className="not-italic text-[12.5px] text-zinc-400 dark:text-zinc-500">点进去看子类和文章</em>
-        </div>
+        <h2 className="mt-8 text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">分类</h2>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {categories.map(folder => {
             const n = countDocs(folder);
