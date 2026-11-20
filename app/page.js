@@ -68,6 +68,7 @@ export default function Home() {
   const [autoSpacingEnabled, setAutoSpacingEnabled] = useState(true);
   const lastSavedContentRef = useRef('');
   const [navOpen, setNavOpen] = useState({});
+  const [draftNode, setDraftNode] = useState(null);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [dragId, setDragId] = useState(null);
@@ -361,16 +362,6 @@ export default function Home() {
     }
   };
 
-  const handleAddNode = async (parentId, type) => {
-    if (!isAdmin) return;
-    const name = prompt(`请输入新${type === 'folder' ? '目录' : '文章'}的名称:`);
-    if (!name) return;
-    const newId = generateId();
-    await addNode(newId, name, type, parentId === 'root' ? null : parentId);
-    await loadTreeData();
-    if (parentId !== 'root') setActiveFolderId(parentId);
-    setActiveFileId(null);
-  };
 
   const startMovingFile = (file) => {
     if (!isAdmin || !file) return;
@@ -722,10 +713,10 @@ export default function Home() {
               </div>
               {isAdmin && (
                 <div className="flex flex-wrap gap-2 shrink-0">
-                  <button type="button" onClick={() => handleAddNode(activeFolder.id, 'file')} className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 transition">
+                  <button type="button" onClick={() => handleCreateNode(activeFolder.id, 'file')} className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 transition">
                     <FilePlus size={16} /> 新文章
                   </button>
-                  <button type="button" onClick={() => handleAddNode(activeFolder.id, 'folder')} className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-200 dark:hover:bg-zinc-700 transition">
+                  <button type="button" onClick={() => handleCreateNode(activeFolder.id, 'folder')} className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 hover:bg-gray-200 dark:bg-zinc-800 dark:text-gray-200 dark:hover:bg-zinc-700 transition">
                     <FolderPlus size={16} /> 新子目录
                   </button>
                 </div>
@@ -992,24 +983,34 @@ export default function Home() {
     showToast('已移动到「' + targetFolder.name + '」');
   };
 
-  const handleCreateNode = async (parentId, type) => {
+  const handleCreateNode = (parentId, type) => {
     if (!isAdmin) return;
     setMenuState(null);
+    if (parentId !== 'root') setNavOpen(prev => ({ ...prev, [parentId]: true }));
+    setDraftNode({ parentId, type, name: '' });
+    setRenamingId(null);
+  };
+
+  const cancelDraft = () => setDraftNode(null);
+
+  const commitDraft = async () => {
+    if (!draftNode) return;
+    const name = draftNode.name.trim();
+    if (!name) { setDraftNode(null); return; }
     const newId = generateId();
-    const defaultName = type === 'folder' ? '新目录' : '新文章';
-    const res = await addNode(newId, defaultName, type, parentId === 'root' ? null : parentId);
+    const parentId = draftNode.parentId;
+    const res = await addNode(newId, name, draftNode.type, parentId === 'root' ? null : parentId);
     if (!res?.success) {
       showToast('新建失败：' + (res?.error || '未知错误'));
       return;
     }
+    setDraftNode(null);
+    await loadTreeData();
     if (parentId !== 'root') {
-      setNavOpen(prev => ({ ...prev, [parentId]: true }));
       setActiveFolderId(parentId);
       setActiveFileId(null);
     }
-    await loadTreeData();
-    setRenamingId(newId);
-    setRenameValue(defaultName);
+    showToast('已新建：' + name);
   };
 
   const openNodeMenu = (event, node) => {
@@ -1068,6 +1069,32 @@ export default function Home() {
     onClick: (event) => event.stopPropagation(),
     onDoubleClick: (event) => event.stopPropagation()
   });
+
+  const renderDraftRow = (depth = 0) => {
+    if (!draftNode) return null;
+    const isFolder = draftNode.type === 'folder';
+    return (
+      <div className="flex items-center rounded-md bg-blue-50/60 dark:bg-blue-500/5">
+        {isFolder ? (
+          <span style={{ marginLeft: 2 + depth * 13 }} className="shrink-0 p-1 text-zinc-400"><Folder size={13} /></span>
+        ) : (
+          <span style={{ marginLeft: 8 + depth * 13 }} className="shrink-0 p-1 text-zinc-400"><FileText size={13} /></span>
+        )}
+        <input
+          autoFocus
+          value={draftNode.name}
+          placeholder={isFolder ? '目录名，回车确定' : '文章名，回车确定'}
+          onChange={(event) => setDraftNode(prev => (prev ? { ...prev, name: event.target.value } : prev))}
+          onBlur={() => { if (draftNode.name.trim()) commitDraft(); else setDraftNode(null); }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') { event.preventDefault(); commitDraft(); }
+            if (event.key === 'Escape') { event.preventDefault(); cancelDraft(); }
+          }}
+          className="min-w-0 flex-1 rounded border border-blue-400 bg-white px-1.5 py-[3px] text-[13.5px] outline-none dark:bg-zinc-900"
+        />
+      </div>
+    );
+  };
 
   const renderNavTree = (nodes, depth = 0) => nodes.map(node => {
     const isFolder = node.type === 'folder';
@@ -1194,6 +1221,7 @@ export default function Home() {
           )}
         </div>
         {open && node.children && node.children.length > 0 && renderNavTree(node.children, depth + 1)}
+        {open && draftNode && draftNode.parentId === node.id && renderDraftRow(depth + 1)}
       </div>
     );
   });
@@ -1278,10 +1306,10 @@ export default function Home() {
           </div>
           {isAdmin && (
             <div className="flex shrink-0 gap-2">
-              <button type="button" onClick={() => handleAddNode(activeFolder.id, 'file')} className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-[13px] text-white hover:bg-blue-700">
+              <button type="button" onClick={() => handleCreateNode(activeFolder.id, 'file')} className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-[13px] text-white hover:bg-blue-700">
                 <FilePlus size={14} /> 新文章
               </button>
-              <button type="button" onClick={() => handleAddNode(activeFolder.id, 'folder')} className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900">
+              <button type="button" onClick={() => handleCreateNode(activeFolder.id, 'folder')} className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900">
                 <FolderPlus size={14} /> 新子目录
               </button>
             </div>
@@ -1503,7 +1531,7 @@ export default function Home() {
               学习首页
             </button>
             {isAdmin && !movingNode && (
-              <button type="button" onClick={() => handleAddNode('root', 'folder')} title="添加根目录" className="rounded p-1 text-zinc-400 hover:text-blue-600">
+              <button type="button" onClick={() => handleCreateNode('root', 'folder')} title="添加根目录" className="rounded p-1 text-zinc-400 hover:text-blue-600">
                 <PlusCircle size={14} />
               </button>
             )}
@@ -1513,7 +1541,10 @@ export default function Home() {
             {isLoading ? (
               <p className="px-3 py-2 text-[13px] text-zinc-400">加载中…</p>
             ) : rootFolders.length > 0 ? (
-              renderNavTree(rootFolders, 0)
+              <>
+                {renderNavTree(rootFolders, 0)}
+                {draftNode && draftNode.parentId === 'root' && renderDraftRow(0)}
+              </>
             ) : (
               <p className="px-3 py-2 text-[13px] text-zinc-400">暂无目录</p>
             )}
@@ -1521,7 +1552,7 @@ export default function Home() {
 
           {isAdmin && activeFolder && !movingNode && (
             <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
-              <button type="button" onClick={() => handleAddNode(activeFolder.id, 'file')} className="flex w-full items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-[13px] text-white hover:bg-blue-700">
+              <button type="button" onClick={() => handleCreateNode(activeFolder.id, 'file')} className="flex w-full items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-[13px] text-white hover:bg-blue-700">
                 <FilePlus size={14} /> 在当前目录新建文章
               </button>
             </div>
