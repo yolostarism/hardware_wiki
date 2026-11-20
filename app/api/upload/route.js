@@ -1,8 +1,15 @@
 import { put } from '@vercel/blob';
 import { NextResponse } from 'next/server';
+import { sql } from '@vercel/postgres';
+import { isOwner } from '../../../lib/auth';
 
 export async function POST(request) {
   try {
+    // 没有会话就不许往 Blob 里写东西
+    if (!(await isOwner(sql))) {
+      return NextResponse.json({ error: '没有编辑权限' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const filename = searchParams.get('filename') || 'image.png';
 
@@ -14,7 +21,6 @@ export async function POST(request) {
 
     return NextResponse.json(blob);
   } catch (error) {
-    // 打印错误到控制台，方便你查看具体的报错原因
     console.error("Blob 上传失败:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

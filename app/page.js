@@ -10,7 +10,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import nextDynamic from 'next/dynamic'; 
-import { getDirectories, getDocument, addNode, updateDocument, moveNode } from './actions';
+import { getDirectories, getDocument, addNode, updateDocument, moveNode, login, logout, getSessionRole } from './actions';
 
 // === 新增：引入数学公式和 HTML 解析插件 ===
 import remarkMath from 'remark-math';
@@ -48,8 +48,10 @@ const formatMarkdownSpacing = (markdown) => {
 
 export default function Home() {
   const [userRole, setUserRole] = useState(null);
-  const [loginUser, setLoginUser] = useState('');
+  const [showLogin, setShowLogin] = useState(false);
   const [loginPass, setLoginPass] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [loginBusy, setLoginBusy] = useState(false);
   const [activeFileId, setActiveFileId] = useState(null);
   const [activeFolderId, setActiveFolderId] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -72,9 +74,12 @@ export default function Home() {
   const [favoriteDocs, setFavoriteDocs] = useState([]);
 
   useEffect(() => {
-    const savedRole = localStorage.getItem('pzp_wiki_role');
-    if (savedRole) setUserRole(savedRole);
-    else setIsLoading(false);
+    // 角色由服务器的会话 cookie 决定，前端不再存任何凭据
+    (async () => {
+      const res = await getSessionRole();
+      setUserRole(res.role === 'admin' ? 'admin' : 'guest');
+      setIsLoading(false);
+    })();
 
     const savedTheme = localStorage.getItem('pzp_wiki_theme');
     const initTheme = savedTheme === 'dark' ? 'dark' : 'light';
@@ -213,39 +218,61 @@ export default function Home() {
     }));
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (loginUser === 'pzpadmin' && loginPass === 'p986960440105++') {
-      setUserRole('admin'); localStorage.setItem('pzp_wiki_role', 'admin');
-    } else if (loginUser === 'guest' && loginPass === '123456') {
-      setUserRole('guest'); localStorage.setItem('pzp_wiki_role', 'guest');
-    } else alert('账号或密码错误！');
+    setLoginBusy(true);
+    setLoginError('');
+    const res = await login(loginPass);
+    setLoginBusy(false);
+    if (res.success) {
+      setUserRole('admin');
+      setShowLogin(false);
+      setLoginPass('');
+      await loadTreeData();
+    } else {
+      setLoginError(res.error || '口令不对');
+    }
   };
 
-  const handleLogout = () => {
-    setUserRole(null); localStorage.removeItem('pzp_wiki_role');
-    setDirectories([]); setActiveFileId(null); setActiveFolderId(null); setMovingNode(null);
+  const handleLogout = async () => {
+    await logout();
+    setUserRole('guest');
+    setIsEditing(false);
+    setActiveFileId(null);
+    setActiveFolderId(null);
+    setMovingNode(null);
   };
 
   const isAdmin = userRole === 'admin';
 
+  // 会话还没问出来时先给个空架子，避免闪一下登录页
   if (!userRole) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-100 dark:bg-zinc-950 transition-colors">
-        <div className="bg-white dark:bg-zinc-900 p-10 rounded-xl shadow-lg w-[400px] border dark:border-zinc-800">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100">⚙️ PZP</h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-2">个人硬件知识库</p>
-          </div>
-          <form onSubmit={handleLogin} className="flex flex-col gap-5">
-            <input type="text" placeholder="用户名" className="border dark:border-zinc-700 dark:bg-zinc-800 dark:text-white p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" value={loginUser} onChange={e => setLoginUser(e.target.value)} required />
-            <input type="password" placeholder="密码" className="border dark:border-zinc-700 dark:bg-zinc-800 dark:text-white p-3 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" value={loginPass} onChange={e => setLoginPass(e.target.value)} required />
-            <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-md shadow-md mt-2">进入知识库</button>
-          </form>
-        </div>
-      </div>
-    );
+    return <div className="h-screen bg-white dark:bg-zinc-950" />;
   }
+
+  const loginDialog = showLogin ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={() => setShowLogin(false)}>
+      <div className="w-full max-w-[340px] rounded-lg border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-800 dark:bg-zinc-900" onMouseDown={e => e.stopPropagation()}>
+        <h2 className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-50">编辑口令</h2>
+        <p className="mt-1 text-[12.5px] text-zinc-500 dark:text-zinc-400">输入口令后才能编辑，浏览不需要。</p>
+        <form onSubmit={handleLogin} className="mt-4 flex flex-col gap-3">
+          <input
+            type="password"
+            autoFocus
+            placeholder="口令"
+            className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-[13.5px] text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+            value={loginPass}
+            onChange={e => setLoginPass(e.target.value)}
+          />
+          {loginError ? <p className="text-[12.5px] text-red-600 dark:text-red-400">{loginError}</p> : null}
+          <div className="mt-1 flex justify-end gap-2">
+            <button type="button" onClick={() => setShowLogin(false)} className="rounded-md px-3 py-1.5 text-[13px] text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800">取消</button>
+            <button type="submit" disabled={loginBusy} className="rounded-md bg-blue-600 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-blue-700 disabled:opacity-60">{loginBusy ? '验证中…' : '登录'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  ) : null;
 
   const uploadImage = async (file) => {
     setIsUploading(true);
@@ -899,10 +926,9 @@ export default function Home() {
 
     return (
       <div className="mx-auto max-w-[900px] px-8 py-14">
-        <p className="text-sm font-medium text-blue-600 dark:text-blue-400">个人硬件知识库</p>
-        <h1 className="mt-2 text-[34px] font-semibold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">从一颗电阻到一台烤瓷炉</h1>
-        <p className="mt-3 max-w-[620px] text-[15px] leading-7 text-zinc-500 dark:text-zinc-400">
-          共 {allFiles.length} 篇文章，按元器件、电源、信号链、通信、主控、电磁兼容、电路实例、项目和杂记分类。
+        <h1 className="text-[30px] font-semibold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">硬件知识库</h1>
+        <p className="mt-2 text-[13.5px] text-zinc-500 dark:text-zinc-400">
+          {rootFolders.flatMap(folder => folder.children || []).filter(c => c.type === 'folder').length} 个分类 · {allFiles.length} 篇
         </p>
 
         {recentDocs.length > 0 && (
@@ -1146,6 +1172,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      {loginDialog}
       <header className="z-30 flex h-14 shrink-0 items-center gap-4 border-b border-zinc-200 px-5 dark:border-zinc-800">
         <button type="button" onClick={openHome} className="flex shrink-0 items-center gap-2">
           <span className="grid h-6 w-6 place-items-center rounded-md bg-blue-600 text-[12px] font-bold text-white">P</span>
@@ -1164,13 +1191,19 @@ export default function Home() {
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
-          <span className={cx('rounded-md px-2 py-1 text-[11.5px]', isAdmin ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300')}>{isAdmin ? '管理员' : '游客'}</span>
+          {isAdmin ? (
+            <span className="rounded-md bg-blue-50 px-2 py-1 text-[11.5px] text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">可编辑</span>
+          ) : (
+            <button type="button" onClick={() => setShowLogin(true)} className="rounded-md px-2 py-1 text-[12px] text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">登录</button>
+          )}
           <button type="button" onClick={toggleTheme} title="切换显示模式" className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">
             {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
           </button>
-          <button type="button" onClick={handleLogout} title="退出" className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">
-            <LogOut size={15} />
-          </button>
+          {isAdmin && (
+            <button type="button" onClick={handleLogout} title="退出编辑" className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">
+              <LogOut size={15} />
+            </button>
+          )}
         </div>
       </header>
 
