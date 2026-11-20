@@ -23,6 +23,28 @@ const generateId = () => Math.random().toString(36).substr(2, 9);
 const RECENT_DOCS_KEY = 'pzp_wiki_recent_docs';
 const FAVORITE_DOCS_KEY = 'pzp_wiki_favorite_docs';
 const READING_POSITIONS_KEY = 'pzp_wiki_reading_positions';
+const AUTO_SPACING_KEY = 'pzp_wiki_auto_spacing';
+
+const addCjkAsciiSpacing = (text) => {
+  if (!text) return '';
+  return text
+    .replace(/([\p{Script=Han}])([A-Za-z0-9])/gu, '$1 $2')
+    .replace(/([A-Za-z0-9])([\p{Script=Han}])/gu, '$1 $2');
+};
+
+const formatMarkdownSpacing = (markdown) => {
+  if (!markdown) return '';
+  return markdown
+    .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g)
+    .map((block, index) => {
+      if (index % 2 === 1) return block;
+      return block
+        .split(/(`[^`\n]*`)/g)
+        .map((part, partIndex) => partIndex % 2 === 1 ? part : addCjkAsciiSpacing(part))
+        .join('');
+    })
+    .join('');
+};
 
 export default function Home() {
   const [userRole, setUserRole] = useState(null);
@@ -41,7 +63,9 @@ export default function Home() {
   const [expandedFolderIds, setExpandedFolderIds] = useState([]);
   const [moveTargetQuery, setMoveTargetQuery] = useState('');
   const [autoSaveStatus, setAutoSaveStatus] = useState('idle');
+  const [autoSpacingEnabled, setAutoSpacingEnabled] = useState(true);
   const lastSavedContentRef = useRef('');
+  const [navOpen, setNavOpen] = useState({});
   
   const [theme, setTheme] = useState('light');
   const [recentDocs, setRecentDocs] = useState([]);
@@ -59,6 +83,7 @@ export default function Home() {
 
     setRecentDocs(JSON.parse(localStorage.getItem(RECENT_DOCS_KEY) || '[]'));
     setFavoriteDocs(JSON.parse(localStorage.getItem(FAVORITE_DOCS_KEY) || '[]'));
+    setAutoSpacingEnabled(localStorage.getItem(AUTO_SPACING_KEY) !== 'false');
   }, []);
 
   useEffect(() => {
@@ -152,9 +177,11 @@ export default function Home() {
     setAutoSaveStatus('pending');
     const timer = setTimeout(async () => {
       setAutoSaveStatus('saving');
-      const res = await updateDocument(activeFileId, markdownContent);
+      const contentToSave = autoSpacingEnabled ? formatMarkdownSpacing(markdownContent) : markdownContent;
+      if (contentToSave !== markdownContent) setMarkdownContent(contentToSave);
+      const res = await updateDocument(activeFileId, contentToSave);
       if (res.success) {
-        lastSavedContentRef.current = markdownContent;
+        lastSavedContentRef.current = contentToSave;
         setAutoSaveStatus('saved');
       } else {
         setAutoSaveStatus('error');
@@ -162,7 +189,7 @@ export default function Home() {
     }, 5000);
 
     return () => clearTimeout(timer);
-  }, [isEditing, activeFileId, markdownContent]);
+  }, [isEditing, activeFileId, markdownContent, autoSpacingEnabled]);
 
   const isFavorite = activeFile ? favoriteDocs.some(doc => doc.id === activeFile.id) : false;
   const autoSaveLabel = {
@@ -313,9 +340,11 @@ export default function Home() {
   };
 
   const handleSave = async () => {
-    const res = await updateDocument(activeFileId, markdownContent);
+    const contentToSave = autoSpacingEnabled ? formatMarkdownSpacing(markdownContent) : markdownContent;
+    if (contentToSave !== markdownContent) setMarkdownContent(contentToSave);
+    const res = await updateDocument(activeFileId, contentToSave);
     if (res.success) {
-      lastSavedContentRef.current = markdownContent;
+      lastSavedContentRef.current = contentToSave;
       setAutoSaveStatus('saved');
       alert("云端保存成功！");
       setIsEditing(false);
@@ -323,6 +352,12 @@ export default function Home() {
       setAutoSaveStatus('error');
       alert(`保存失败：${res.error || '未知错误'}`);
     }
+  };
+
+  const toggleAutoSpacing = () => {
+    const next = !autoSpacingEnabled;
+    setAutoSpacingEnabled(next);
+    localStorage.setItem(AUTO_SPACING_KEY, String(next));
   };
 
   const openFolder = (folder) => {
@@ -749,165 +784,431 @@ export default function Home() {
     );
   };
 
-  return (
-    <div className="flex h-screen overflow-hidden bg-white dark:bg-zinc-950 text-black dark:text-zinc-100 transition-colors">
-      
-      {/* === 左侧导航入口区域 === */}
-      <div className="w-72 bg-gray-50 dark:bg-zinc-900 border-r border-gray-200 dark:border-zinc-800 flex flex-col select-none transition-colors">
-        <div className="p-4 border-b border-gray-200 dark:border-zinc-800">
-          <h1 className="text-lg font-bold text-gray-800 dark:text-gray-100 tracking-wide">⚙️ PZP 知识库</h1>
-          <button type="button" onClick={openHome} className={`mt-4 w-full flex items-center gap-2 px-3 py-2 rounded-md text-left text-sm transition ${!activeFileId && !activeFolderId && !searchQuery ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-white text-gray-800 hover:bg-gray-100 dark:bg-zinc-800 dark:text-gray-200 dark:hover:bg-zinc-700'}`}>
-            <HomeIcon size={16} /> 学习首页
+
+  // ===== Fumadocs 式三栏渲染层 =====
+  const cx = (...args) => args.filter(Boolean).join(' ');
+
+  const slugifyHeading = (text) =>
+    text.trim().toLowerCase().replace(/[^\p{Script=Han}\w\s-]/gu, '').replace(/\s+/g, '-').slice(0, 40) || 'section';
+
+  const extractHeadings = (md) => {
+    const result = [];
+    const seen = {};
+    let inFence = false;
+    String(md || '').split(/\r?\n/).forEach(line => {
+      if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return; }
+      if (inFence) return;
+      const m = /^(#{1,3})\s+(.+)$/.exec(line);
+      if (!m) return;
+      const text = m[2].replace(/[*_`]/g, '').trim();
+      let id = slugifyHeading(text);
+      if (seen[id]) { seen[id] += 1; id = id + '-' + seen[id]; } else { seen[id] = 1; }
+      result.push({ level: m[1].length, text, id });
+    });
+    return result;
+  };
+
+  const activeHeadings = extractHeadings(markdownContent);
+  const headingIdByText = {};
+  activeHeadings.forEach(h => { headingIdByText[h.text] = h.id; });
+
+  const flattenText = (node) => {
+    if (node == null || node === false) return '';
+    if (typeof node === 'string' || typeof node === 'number') return String(node);
+    if (Array.isArray(node)) return node.map(flattenText).join('');
+    if (node.props && node.props.children) return flattenText(node.props.children);
+    return '';
+  };
+
+  const mdComponents = {
+    h1: ({ children }) => {
+      const id = headingIdByText[flattenText(children).trim()];
+      return <h1 id={id} style={{ scrollMarginTop: 96 }}>{children}</h1>;
+    },
+    h2: ({ children }) => {
+      const id = headingIdByText[flattenText(children).trim()];
+      return <h2 id={id} style={{ scrollMarginTop: 96 }}>{children}</h2>;
+    },
+    h3: ({ children }) => {
+      const id = headingIdByText[flattenText(children).trim()];
+      return <h3 id={id} style={{ scrollMarginTop: 96 }}>{children}</h3>;
+    },
+  };
+
+  const toggleNav = (id, open) => setNavOpen(prev => ({ ...prev, [id]: !open }));
+
+  const renderNavTree = (nodes, depth = 0) => nodes.map(node => {
+    if (node.type === 'file') {
+      const active = activeFileId === node.id;
+      return (
+        <button
+          key={node.id}
+          type="button"
+          onClick={() => openFile(node)}
+          style={{ paddingLeft: 8 + depth * 13 }}
+          className={cx(
+            'flex w-full items-center gap-2 rounded-md py-[5px] pr-2 text-left text-[13.5px] leading-5 transition',
+            active
+              ? 'bg-blue-50 font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
+              : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/60'
+          )}
+        >
+          <FileText size={13} className={cx('shrink-0', active ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-400')} />
+          <span className="truncate">{node.name}</span>
+        </button>
+      );
+    }
+    const open = navOpen[node.id] !== undefined ? navOpen[node.id] : depth < 2;
+    const active = activeFolderId === node.id;
+    return (
+      <div key={node.id}>
+        <div className="flex items-center rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60">
+          <button
+            type="button"
+            onClick={() => toggleNav(node.id, open)}
+            style={{ marginLeft: 2 + depth * 13 }}
+            className="shrink-0 rounded p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+            aria-label={open ? '收起' : '展开'}
+          >
+            <ChevronRight size={13} className={cx('transition-transform', open && 'rotate-90')} />
+          </button>
+          <button
+            type="button"
+            onClick={() => openFolder(allFolders.find(item => item.id === node.id) || node)}
+            className={cx(
+              'min-w-0 flex-1 truncate py-[5px] pr-2 text-left text-[13.5px] leading-5',
+              active ? 'font-medium text-blue-700 dark:text-blue-300' : 'text-zinc-700 dark:text-zinc-300'
+            )}
+          >
+            {node.name}
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-          {isLoading ? (
-            <p className="text-gray-400 text-sm">加载中...</p>
-          ) : (
-            <>
-              <section>
-                <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                  <Clock size={14} /> 最近打开
-                </div>
-                <div className="space-y-1">
-                  {recentDocs.length > 0 ? recentDocs.slice(0, 5).map(doc => renderSidebarDoc(doc, <Clock size={14} />)) : (
-                    <p className="px-2 py-1.5 text-xs text-gray-400">还没有打开记录</p>
-                  )}
-                </div>
-              </section>
+        {open && node.children && node.children.length > 0 && renderNavTree(node.children, depth + 1)}
+      </div>
+    );
+  });
 
-              <section>
-                <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                  <Star size={14} /> 收藏
-                </div>
-                <div className="space-y-1">
-                  {favoriteDocs.length > 0 ? favoriteDocs.slice(0, 6).map(doc => renderSidebarDoc(doc, <Star size={14} />)) : (
-                    <p className="px-2 py-1.5 text-xs text-gray-400">收藏后会出现在这里</p>
-                  )}
-                </div>
-              </section>
+  const countDocs = (folder) => {
+    if (!folder) return 0;
+    const kids = folder.children || [];
+    return kids.reduce((sum, child) => sum + (child.type === 'file' ? 1 : countDocs(child)), 0);
+  };
 
-              <section>
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                    <Folder size={14} /> 目录
-                  </div>
-                  {isAdmin && !movingNode && (
-                    <button type="button" onClick={() => handleAddNode('root', 'folder')} className="p-1 rounded text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-zinc-800" title="添加根目录">
-                      <PlusCircle size={15} />
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  {rootFolders.length > 0 ? rootFolders.map(renderSidebarFolder) : (
-                    <p className="px-2 py-1.5 text-xs text-gray-400">暂无根目录</p>
-                  )}
-                </div>
-              </section>
-            </>
-          )}
-        </div>
-        {isAdmin && activeFolder && !movingNode && (
-          <div className="p-4 border-t border-gray-200 dark:border-zinc-800">
-            <button onClick={() => handleAddNode(activeFolder.id, 'file')} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600">
-              <FilePlus size={18} /><span>在当前目录新建文章</span>
-            </button>
+  const renderHomePage = () => {
+    const categories = rootFolders.flatMap(folder => folder.children || []).filter(child => child.type === 'folder');
+
+    return (
+      <div className="mx-auto max-w-[900px] px-8 py-14">
+        <p className="text-sm font-medium text-blue-600 dark:text-blue-400">个人硬件知识库</p>
+        <h1 className="mt-2 text-[34px] font-semibold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">从一颗电阻到一台烤瓷炉</h1>
+        <p className="mt-3 max-w-[620px] text-[15px] leading-7 text-zinc-500 dark:text-zinc-400">
+          共 {allFiles.length} 篇文章，按元器件、电源、信号链、通信、主控、电磁兼容、电路实例、项目和杂记分类。
+        </p>
+
+        {recentDocs.length > 0 && (
+          <div className="mt-10">
+            <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-zinc-500 dark:text-zinc-400">
+              <Clock size={14} /> 最近打开
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {recentDocs.slice(0, 5).map(doc => (
+                <button key={doc.id} type="button" onClick={() => openFile(allFiles.find(f => f.id === doc.id) || doc)} className="rounded-md border border-zinc-200 px-3 py-1.5 text-[13px] text-zinc-700 transition hover:border-blue-300 hover:text-blue-700 dark:border-zinc-800 dark:text-zinc-300">
+                  {doc.name}
+                </button>
+              ))}
+            </div>
           </div>
         )}
-      </div>
 
-      {/* === 右侧主内容区域 === */}
-      <div className="flex-1 flex flex-col">
-        {/* 顶部导航栏 */}
-        <div className="h-16 border-b border-gray-200 dark:border-zinc-800 flex items-center justify-between px-6 bg-white dark:bg-zinc-900 shrink-0 transition-colors">
-          <div className="relative">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-            <input 
-              type="text" 
-              placeholder="搜索芯片..." 
-              className="pl-10 pr-4 py-2 border dark:border-zinc-700 rounded-md text-sm bg-transparent focus:outline-none focus:border-blue-500" 
-              // === 新增以下两行 ===
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500 dark:text-gray-400 hidden sm:block">当前：<span className={isAdmin ? 'text-blue-600 dark:text-blue-400 font-bold' : 'text-green-600 dark:text-green-400 font-bold'}>{isAdmin ? '管理员' : '游客'}</span></span>
-            
-            <button onClick={toggleTheme} className="flex gap-2 text-sm bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 px-3 py-2 rounded-md hover:bg-gray-200 dark:hover:bg-zinc-700 transition" title="切换显示模式">
-              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-              <span className="hidden md:inline">{theme === 'dark' ? '浅色' : '暗色'}</span>
-            </button>
-            
-            <button onClick={handleLogout} className="flex gap-2 text-sm bg-gray-100 dark:bg-zinc-800 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-md hover:bg-gray-200 dark:hover:bg-zinc-700 transition"><LogOut size={16} />退出</button>
-          </div>
-        </div>
-
-        {/* 文章阅读/编辑区 */}
-        <div id="article-scroll-area" onScroll={saveReadingPosition} className="flex-1 min-h-0 overflow-y-auto bg-white dark:bg-zinc-950 transition-colors">
-          {searchQuery.trim() ? renderSearchResults() : !activeFileId ? (activeFolder ? renderFolderPanel() : renderLearningHome()) : (
-            <div className="p-8">
-              <button type="button" onClick={returnFromArticle} className="mb-4 inline-flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
-                <ChevronLeft size={16} /> {activeFolder ? `返回 ${activeFolder.name}` : '返回学习首页'}
-              </button>
-              <div className="flex justify-between items-start mb-6 border-b dark:border-zinc-800 pb-4">
-                <div>
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 mb-2">
-                    <MapPin size={14} />
-                    <span>{activeFile?.path || activeTitle}</span>
-                  </div>
-                  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100">{activeTitle}</h2>
-                  {isUploading && <span className="text-sm text-blue-500 mt-2 block animate-pulse">图片拼命上传中，请稍候...</span>}
-                </div>
-                <div className="flex flex-wrap justify-end gap-2">
-                  {isEditing && autoSaveLabel && (
-                    <span className={`flex items-center px-2 text-xs ${autoSaveStatus === 'error' ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'}`}>
-                      {autoSaveLabel}
-                    </span>
-                  )}
-                  <button onClick={toggleFavoriteDoc} className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition ${isFavorite ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>
-                    <Star size={16} /> {isFavorite ? '已收藏' : '收藏'}
-                  </button>
-                  {previousFile && (
-                    <button onClick={() => openFile(previousFile)} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200">
-                      <ChevronLeft size={16} /> 上一篇
-                    </button>
-                  )}
-                  {nextFile && (
-                    <button onClick={() => openFile(nextFile)} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200">
-                      下一篇 <ChevronRight size={16} />
-                    </button>
-                  )}
-                  {isAdmin && (<button onClick={() => isEditing ? handleSave() : setIsEditing(true)} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm transition ${isEditing ? 'bg-green-600 text-white dark:bg-green-700' : 'bg-gray-100 text-gray-800 dark:bg-zinc-800 dark:text-gray-200'}`}>{isEditing ? <><Save size={16} /> 保存</> : <><Edit2 size={16} /> 编辑</>}</button>)}
-                </div>
+        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {categories.map(folder => (
+            <button
+              key={folder.id}
+              type="button"
+              onClick={() => openFolder(allFolders.find(item => item.id === folder.id) || folder)}
+              className="group rounded-xl border border-zinc-200 p-5 text-left transition hover:border-blue-300 hover:shadow-sm dark:border-zinc-800 dark:hover:border-blue-800"
+            >
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-2 text-[15px] font-medium text-zinc-900 dark:text-zinc-100">
+                  <Folder size={16} className="text-blue-500" /> {folder.name}
+                </span>
+                <ChevronRight size={15} className="text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" />
               </div>
-              {isEditing ? (
-                <div data-color-mode={theme} className="h-[calc(100vh-220px)]" onPaste={handlePaste} onDrop={handleDrop}>
-                  <MDEditor 
-                    value={markdownContent || ' '} 
-                    onChange={setMarkdownContent} 
-                    height="100%" 
-                    previewOptions={{
-                      remarkPlugins: [remarkGfm, remarkMath],
-                      rehypePlugins: [rehypeRaw, rehypeKatex]
-                    }}
-                  />
-                </div>
-              ) : (
-                <div className="prose prose-blue dark:prose-invert max-w-none">
-                  <ReactMarkdown 
-                    remarkPlugins={[remarkGfm, remarkMath]}
-                    rehypePlugins={[rehypeRaw, rehypeKatex]}
-                  >
-                    {markdownContent || ' '}
-                  </ReactMarkdown>
-                </div>
-              )}
+              <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">
+                {(folder.children || []).filter(child => child.type === 'folder').length} 个子类 · {countDocs(folder)} 篇
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderFolderPage = () => {
+    if (!activeFolder) return renderHomePage();
+    const childFolders = (activeFolder.children || []).filter(child => child.type === 'folder');
+    const childFiles = (activeFolder.children || [])
+      .filter(child => child.type === 'file')
+      .map(file => allFiles.find(item => item.id === file.id) || file);
+    const descendantFiles = allFiles.filter(file =>
+      file.id !== activeFileId &&
+      file.path &&
+      file.path.indexOf(activeFolder.path + ' / ') === 0 &&
+      file.parentKey !== activeFolder.id
+    );
+
+    return (
+      <div className="mx-auto max-w-[900px] px-8 py-12">
+        <button type="button" onClick={goToParentFolder} className="mb-5 inline-flex items-center gap-1 text-[13px] text-zinc-500 hover:text-blue-600 dark:text-zinc-400">
+          <ChevronLeft size={14} /> {activeFolderParent ? activeFolderParent.name : '学习首页'}
+        </button>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-[30px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">{activeFolder.name}</h1>
+            <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">{activeFolder.path}</p>
+          </div>
+          {isAdmin && (
+            <div className="flex shrink-0 gap-2">
+              <button type="button" onClick={() => handleAddNode(activeFolder.id, 'file')} className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-[13px] text-white hover:bg-blue-700">
+                <FilePlus size={14} /> 新文章
+              </button>
+              <button type="button" onClick={() => handleAddNode(activeFolder.id, 'folder')} className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 px-3 py-1.5 text-[13px] text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900">
+                <FolderPlus size={14} /> 新子目录
+              </button>
             </div>
           )}
         </div>
+
+        <div className="mt-8">{renderMoveTargetPanel()}</div>
+
+        {childFolders.length > 0 && (
+          <section className="mt-4">
+            <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">子目录</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {childFolders.map(folder => renderNestedFolderPreview(folder))}
+            </div>
+          </section>
+        )}
+
+        <section className="mt-8">
+          <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">本目录文章</h2>
+          {childFiles.length > 0 ? (
+            <div className="divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+              {childFiles.map(file => renderArticleRow(file))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-zinc-300 px-4 py-8 text-center text-[13px] text-zinc-400 dark:border-zinc-800">这个目录下暂时没有文章。</p>
+          )}
+        </section>
+
+        {descendantFiles.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">子目录文章</h2>
+            <div className="divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+              {descendantFiles.map(file => renderArticleRow(file))}
+            </div>
+          </section>
+        )}
+      </div>
+    );
+  };
+
+  const renderSearchPage = () => {
+    const query = searchQuery.trim().toLowerCase();
+    const matchedFolders = allFolders.filter(folder => folder.name.toLowerCase().includes(query) || folder.path.toLowerCase().includes(query));
+    const matchedFiles = allFiles.filter(file => file.name.toLowerCase().includes(query) || file.path.toLowerCase().includes(query));
+
+    return (
+      <div className="mx-auto max-w-[900px] px-8 py-12">
+        <h1 className="text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">“{searchQuery}”</h1>
+        <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">找到 {matchedFolders.length} 个目录，{matchedFiles.length} 篇文章。</p>
+
+        {matchedFolders.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">目录</h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {matchedFolders.map(folder => (
+                <button key={folder.id} type="button" onClick={() => openFolder(folder)} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-4 py-3 text-left transition hover:border-blue-300 dark:border-zinc-800">
+                  <span className="min-w-0">
+                    <span className="block truncate text-[14px] text-zinc-800 dark:text-zinc-100">{folder.name}</span>
+                    <span className="block truncate text-[12px] text-zinc-400">{folder.path}</span>
+                  </span>
+                  <ChevronRight size={14} className="shrink-0 text-zinc-300" />
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="mt-8">
+          <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">文章</h2>
+          {matchedFiles.length > 0 ? (
+            <div className="divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+              {matchedFiles.map(file => renderArticleRow(file))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-zinc-300 px-4 py-8 text-center text-[13px] text-zinc-400 dark:border-zinc-800">没有匹配的文章。</p>
+          )}
+        </section>
+      </div>
+    );
+  };
+
+  const renderArticlePage = () => (
+    <div className="mx-auto flex max-w-[1120px] gap-10 px-8 py-12">
+      <article className="min-w-0 max-w-[760px] flex-1">
+        <div className="flex items-center gap-1.5 text-[12.5px] text-zinc-400">
+          <button type="button" onClick={returnFromArticle} className="hover:text-blue-600">{activeFolder ? activeFolder.name : '学习首页'}</button>
+          <ChevronRight size={12} />
+          <span className="truncate text-zinc-500 dark:text-zinc-400">{activeTitle}</span>
+        </div>
+
+        <h1 className="mt-3 text-[30px] font-semibold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">{activeTitle}</h1>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-b border-zinc-200 pb-4 dark:border-zinc-800">
+          {isUploading && <span className="animate-pulse text-[12px] text-blue-500">图片上传中…</span>}
+          {isEditing && autoSaveLabel && (
+            <span className={cx('text-[12px]', autoSaveStatus === 'error' ? 'text-red-500' : 'text-zinc-400')}>{autoSaveLabel}</span>
+          )}
+          <button type="button" onClick={toggleFavoriteDoc} className={cx('inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12.5px] transition', isFavorite ? 'border-yellow-300 bg-yellow-50 text-yellow-800 dark:border-yellow-900 dark:bg-yellow-900/20 dark:text-yellow-200' : 'border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900')}>
+            <Star size={13} /> {isFavorite ? '已收藏' : '收藏'}
+          </button>
+          {isEditing && (
+            <button type="button" onClick={toggleAutoSpacing} className={cx('inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12.5px] transition', autoSpacingEnabled ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200' : 'border-zinc-200 text-zinc-500 dark:border-zinc-800 dark:text-zinc-400')}>
+              Auto spacing {autoSpacingEnabled ? 'ON' : 'OFF'}
+            </button>
+          )}
+          {isAdmin && (
+            <button type="button" onClick={() => (isEditing ? handleSave() : setIsEditing(true))} className={cx('ml-auto inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] transition', isEditing ? 'bg-green-600 text-white' : 'border border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300')}>
+              {isEditing ? <><Save size={13} /> 保存</> : <><Edit2 size={13} /> 编辑</>}
+            </button>
+          )}
+        </div>
+
+        {isEditing ? (
+          <div data-color-mode={theme} className="mt-6" style={{ height: 'calc(100vh - 260px)' }} onPaste={handlePaste} onDrop={handleDrop}>
+            <MDEditor
+              value={markdownContent || ' '}
+              onChange={setMarkdownContent}
+              height="100%"
+              previewOptions={{ remarkPlugins: [remarkGfm, remarkMath], rehypePlugins: [rehypeRaw, rehypeKatex] }}
+            />
+          </div>
+        ) : (
+          <div className="prose prose-zinc dark:prose-invert mt-6 max-w-none prose-headings:tracking-tight prose-a:text-blue-600 prose-pre:bg-[#18181b] prose-pre:text-zinc-100 prose-h1:mt-10 prose-h1:mb-4 prose-h1:border-b prose-h1:border-zinc-200 prose-h1:pb-2 prose-h1:text-[20px] prose-h1:font-semibold dark:prose-h1:border-zinc-800">
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeRaw, rehypeKatex]} components={mdComponents}>
+              {markdownContent || ' '}
+            </ReactMarkdown>
+          </div>
+        )}
+
+        <div className="mt-12 flex items-center justify-between gap-4 border-t border-zinc-200 pt-5 dark:border-zinc-800">
+          {previousFile ? (
+            <button type="button" onClick={() => openFile(previousFile)} className="min-w-0 text-left text-[13px] text-zinc-500 hover:text-blue-600">
+              <span className="flex items-center gap-1 text-[11.5px] text-zinc-400"><ChevronLeft size={12} /> 上一篇</span>
+              <span className="mt-1 block truncate font-medium text-zinc-800 dark:text-zinc-200">{previousFile.name}</span>
+            </button>
+          ) : <span />}
+          {nextFile ? (
+            <button type="button" onClick={() => openFile(nextFile)} className="min-w-0 text-right text-[13px] text-zinc-500 hover:text-blue-600">
+              <span className="flex items-center justify-end gap-1 text-[11.5px] text-zinc-400">下一篇 <ChevronRight size={12} /></span>
+              <span className="mt-1 block truncate font-medium text-zinc-800 dark:text-zinc-200">{nextFile.name}</span>
+            </button>
+          ) : <span />}
+        </div>
+      </article>
+
+      {!isEditing && activeHeadings.length > 0 && (
+        <aside className="hidden w-[220px] shrink-0 xl:block">
+          <div className="sticky top-12">
+            <p className="mb-3 text-[12px] font-medium uppercase tracking-wide text-zinc-400">本页目录</p>
+            <div className="space-y-1 border-l border-zinc-200 dark:border-zinc-800">
+              {activeHeadings.map(heading => (
+                <button
+                  key={heading.id}
+                  type="button"
+                  onClick={() => {
+                    const el = document.getElementById(heading.id);
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  }}
+                  style={{ paddingLeft: heading.level === 1 ? 12 : heading.level === 2 ? 18 : 26 }}
+                  className="-ml-px block w-full border-l border-transparent py-0.5 text-left text-[12.5px] leading-5 text-zinc-500 transition hover:border-blue-400 hover:text-blue-600 dark:text-zinc-400"
+                >
+                  {heading.text}
+                </button>
+              ))}
+            </div>
+          </div>
+        </aside>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen flex-col overflow-hidden bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      <header className="z-30 flex h-14 shrink-0 items-center gap-4 border-b border-zinc-200 px-5 dark:border-zinc-800">
+        <button type="button" onClick={openHome} className="flex shrink-0 items-center gap-2">
+          <span className="grid h-6 w-6 place-items-center rounded-md bg-blue-600 text-[12px] font-bold text-white">P</span>
+          <span className="text-[14.5px] font-semibold tracking-tight">PZP 硬件知识库</span>
+        </button>
+
+        <div className="relative ml-2 w-full max-w-[260px]">
+          <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜索芯片、器件、协议…"
+            className="w-full rounded-md border border-zinc-200 bg-transparent py-1.5 pl-8 pr-3 text-[13px] outline-none transition focus:border-blue-400 dark:border-zinc-800"
+          />
+        </div>
+
+        <div className="ml-auto flex items-center gap-1.5">
+          <span className={cx('rounded-md px-2 py-1 text-[11.5px]', isAdmin ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300')}>{isAdmin ? '管理员' : '游客'}</span>
+          <button type="button" onClick={toggleTheme} title="切换显示模式" className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">
+            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+          </button>
+          <button type="button" onClick={handleLogout} title="退出" className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800">
+            <LogOut size={15} />
+          </button>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        <aside className="hidden w-[260px] shrink-0 flex-col overflow-hidden border-r border-zinc-200 md:flex dark:border-zinc-800">
+          <div className="flex items-center justify-between px-3 pb-1 pt-3">
+            <button type="button" onClick={openHome} className={cx('flex-1 rounded-md px-2 py-1.5 text-left text-[13.5px] transition', !activeFileId && !activeFolderId && !searchQuery.trim() ? 'bg-blue-50 font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/60')}>
+              学习首页
+            </button>
+            {isAdmin && !movingNode && (
+              <button type="button" onClick={() => handleAddNode('root', 'folder')} title="添加根目录" className="rounded p-1 text-zinc-400 hover:text-blue-600">
+                <PlusCircle size={14} />
+              </button>
+            )}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-6 pt-2">
+            {isLoading ? (
+              <p className="px-3 py-2 text-[13px] text-zinc-400">加载中…</p>
+            ) : rootFolders.length > 0 ? (
+              renderNavTree(rootFolders, 0)
+            ) : (
+              <p className="px-3 py-2 text-[13px] text-zinc-400">暂无目录</p>
+            )}
+          </div>
+
+          {isAdmin && activeFolder && !movingNode && (
+            <div className="border-t border-zinc-200 p-3 dark:border-zinc-800">
+              <button type="button" onClick={() => handleAddNode(activeFolder.id, 'file')} className="flex w-full items-center justify-center gap-1.5 rounded-md bg-blue-600 px-3 py-2 text-[13px] text-white hover:bg-blue-700">
+                <FilePlus size={14} /> 在当前目录新建文章
+              </button>
+            </div>
+          )}
+        </aside>
+
+        <main id="article-scroll-area" onScroll={saveReadingPosition} className="min-w-0 flex-1 overflow-y-auto">
+          {searchQuery.trim() ? renderSearchPage() : activeFileId ? renderArticlePage() : renderFolderPage()}
+        </main>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { sql } from '@vercel/postgres';
 import { neonConfig } from '@neondatabase/serverless';
 import { ProxyAgent, fetch as undiciFetch } from 'undici';
 
-const neonProxyUrl = process.env.NEON_FETCH_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || (process.env.NODE_ENV !== 'production' ? 'http://127.0.0.1:7890' : '');
+const neonProxyUrl = process.env.NEON_FETCH_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || ''; // 本机直连 Neon 可用；之前 dev 默认走 7890 代理，但 7890 已不再监听，导致取数为空
 
 if (neonProxyUrl) {
   const neonProxyAgent = new ProxyAgent(neonProxyUrl);

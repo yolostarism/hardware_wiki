@@ -42,3 +42,7 @@ next-env.d.ts
 
 .vercel
 .env*.local
+
+# local backups / screenshots
+_backup/
+_preview/
