@@ -264,6 +264,21 @@ export default function Home() {
     };
   }, [menuState]);
 
+  // 编辑中快捷键：Ctrl/Cmd+S 保存，Esc 退出（放在早返回之前，保证 hooks 顺序稳定）
+  useEffect(() => {
+    if (!isEditing) return;
+    const onKey = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        handleSave(true);
+      } else if (event.key === 'Escape') {
+        setIsEditing(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isEditing, markdownContent, autoSpacingEnabled, activeFileId]);
+
   if (!userRole) {
     return <div className="h-screen bg-white dark:bg-zinc-950" />;
   }
@@ -384,18 +399,18 @@ export default function Home() {
     cancelMovingFile();
   };
 
-  const handleSave = async () => {
+  const handleSave = async (keepEditing = false) => {
     const contentToSave = autoSpacingEnabled ? formatMarkdownSpacing(markdownContent) : markdownContent;
     if (contentToSave !== markdownContent) setMarkdownContent(contentToSave);
     const res = await updateDocument(activeFileId, contentToSave);
     if (res.success) {
       lastSavedContentRef.current = contentToSave;
       setAutoSaveStatus('saved');
-      alert("云端保存成功！");
-      setIsEditing(false);
+      showToast('已保存');
+      if (!keepEditing) setIsEditing(false);
     } else {
       setAutoSaveStatus('error');
-      alert(`保存失败：${res.error || '未知错误'}`);
+      showToast('保存失败：' + (res.error || '未知错误'));
     }
   };
 
@@ -1349,8 +1364,8 @@ export default function Home() {
   };
 
   const renderArticlePage = () => (
-    <div className="mx-auto flex max-w-[1120px] gap-10 px-8 py-12">
-      <article className="min-w-0 max-w-[760px] flex-1">
+    <div className={cx('mx-auto flex gap-10 px-8', isEditing ? 'max-w-[1500px] py-6' : 'max-w-[1120px] py-12')}>
+      <article className={cx('min-w-0 flex-1', isEditing ? 'max-w-none' : 'max-w-[760px]')}>
         <div className="flex items-center gap-1.5 text-[12.5px] text-zinc-400">
           <button type="button" onClick={returnFromArticle} className="hover:text-blue-600">{activeFolder ? activeFolder.name : '学习首页'}</button>
           <ChevronRight size={12} />
@@ -1380,7 +1395,7 @@ export default function Home() {
         </div>
 
         {isEditing ? (
-          <div data-color-mode={theme} className="mt-6" style={{ height: 'calc(100vh - 260px)' }} onPaste={handlePaste} onDrop={handleDrop}>
+          <div data-color-mode={theme} className="mt-5" style={{ height: 'calc(100vh - 232px)', minHeight: 420 }} onPaste={handlePaste} onDrop={handleDrop}>
             <MDEditor
               value={markdownContent || ' '}
               onChange={setMarkdownContent}
@@ -1396,7 +1411,7 @@ export default function Home() {
           </div>
         )}
 
-        <div className="mt-12 flex items-center justify-between gap-4 border-t border-zinc-200 pt-5 dark:border-zinc-800">
+        {!isEditing && (<div className="mt-12 flex items-center justify-between gap-4 border-t border-zinc-200 pt-5 dark:border-zinc-800">
           {previousFile ? (
             <button type="button" onClick={() => openFile(previousFile)} className="min-w-0 text-left text-[13px] text-zinc-500 hover:text-blue-600">
               <span className="flex items-center gap-1 text-[11.5px] text-zinc-400"><ChevronLeft size={12} /> 上一篇</span>
@@ -1409,7 +1424,7 @@ export default function Home() {
               <span className="mt-1 block truncate font-medium text-zinc-800 dark:text-zinc-200">{nextFile.name}</span>
             </button>
           ) : <span />}
-        </div>
+        </div>)}
       </article>
 
       {!isEditing && activeHeadings.length > 0 && (
