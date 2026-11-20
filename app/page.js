@@ -10,7 +10,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import nextDynamic from 'next/dynamic'; 
-import { getDirectories, getDocument, addNode, updateDocument, moveNode, renameNode, deleteNode, searchDocuments, login, logout, getSessionRole } from './actions';
+import { getDirectories, getDocument, addNode, updateDocument, moveNode, renameNode, deleteNode, searchDocuments, login, logout, getSessionRole, getLibraryStats } from './actions';
 
 // === 新增：引入数学公式和 HTML 解析插件 ===
 import remarkMath from 'remark-math';
@@ -56,6 +56,7 @@ export default function Home() {
   const [activeFolderId, setActiveFolderId] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [directories, setDirectories] = useState([]);
+  const [libraryStats, setLibraryStats] = useState(null);
   const [markdownContent, setMarkdownContent] = useState("");
   const [activeTitle, setActiveTitle] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -217,6 +218,8 @@ export default function Home() {
     setIsLoading(true);
     const res = await getDirectories();
     if (res.success) setDirectories(buildTree(res.data, null));
+    const stats = await getLibraryStats();
+    if (stats.success) setLibraryStats(stats);
     setIsLoading(false);
   };
 
@@ -1189,55 +1192,167 @@ export default function Home() {
     return kids.reduce((sum, child) => sum + (child.type === 'file' ? 1 : countDocs(child)), 0);
   };
 
+  // 首页的知识分布图：角度按分类数均分，圆直径按篇数比例，全部由数据算出，加分类自动重排
+  const renderKnowledgeMap = (categories) => {
+    if (!categories.length) return null;
+    const W = 480, H = 440, cx0 = 240, cy0 = 216, ORB = 148;
+    const maxN = Math.max(...categories.map(c => countDocs(c)), 1);
+    const total = categories.reduce((sum, c) => sum + countDocs(c), 0);
+    const nodes = categories.map((c, i) => {
+      const ang = (i / categories.length) * Math.PI * 2 - Math.PI / 2;
+      const n = countDocs(c);
+      return { c, n, ang, cos: Math.cos(ang), x: cx0 + Math.cos(ang) * ORB, y: cy0 + Math.sin(ang) * ORB, r: 10 + (n / maxN) * 12 };
+    });
+    const subDots = nodes.flatMap(nd => (nd.c.children || []).filter(k => k.type === 'folder').map((k, j, arr) => {
+      const cnt = countDocs(k);
+      const a2 = nd.ang + (j - (arr.length - 1) / 2) * 0.42;
+      const d2 = 34 + Math.min(cnt, 12) * 2.2;
+      const px = nd.x + Math.cos(a2) * d2, py = nd.y + Math.sin(a2) * d2;
+      return { key: k.id, x1: nd.x, y1: nd.y, x: px, y: py, r: 2.4 + Math.min(cnt, 10) * 0.42 };
+    }));
+    return (
+      <svg viewBox={'0 0 ' + W + ' ' + H} className="block h-auto w-full overflow-visible">
+        {nodes.map(nd => (
+          <line key={'l' + nd.c.id} x1={cx0} y1={cy0} x2={nd.x} y2={nd.y} strokeWidth={1 + (nd.n / maxN) * 2} className="stroke-blue-200 dark:stroke-blue-900" />
+        ))}
+        {subDots.map(d => (
+          <g key={'s' + d.key}>
+            <line x1={d.x1} y1={d.y1} x2={d.x} y2={d.y} strokeWidth={1} className="stroke-blue-100 dark:stroke-blue-950" />
+            <circle cx={d.x} cy={d.y} r={d.r} className="fill-blue-300 dark:fill-blue-800" opacity={0.9} />
+          </g>
+        ))}
+        {nodes.map(nd => {
+          const side = nd.cos > 0.4 ? 'start' : nd.cos < -0.4 ? 'end' : 'middle';
+          const lx = nd.x + (nd.cos > 0.4 ? nd.r + 8 : nd.cos < -0.4 ? -nd.r - 8 : 0);
+          const ly = nd.y + (Math.abs(nd.cos) <= 0.4 ? (nd.y < cy0 ? -nd.r - 9 : nd.r + 16) : 4);
+          return (
+            <g key={nd.c.id} role="button" tabIndex={0} onClick={() => openFolder(allFolders.find(item => item.id === nd.c.id) || nd.c)} className="cursor-pointer">
+              <title>{nd.c.name + ' · ' + nd.n + ' 篇'}</title>
+              <circle cx={nd.x} cy={nd.y} r={nd.r} strokeWidth={1.5} className="fill-blue-100 stroke-blue-500 dark:fill-blue-950 dark:stroke-blue-500" />
+              <text x={nd.x} y={nd.y + 3.8} textAnchor="middle" fontSize={10.5} fontWeight={700} className="fill-blue-700 dark:fill-blue-300">{nd.n}</text>
+              <text x={lx} y={ly} textAnchor={side} fontSize={11.5} className="fill-zinc-500 dark:fill-zinc-400">{nd.c.name}</text>
+            </g>
+          );
+        })}
+        <circle cx={cx0} cy={cy0} r={30} className="fill-blue-600" />
+        <text x={cx0} y={cy0 + 5} textAnchor="middle" fontSize={12.5} fontWeight={700} className="fill-white">{total}</text>
+      </svg>
+    );
+  };
+
   const renderHomePage = () => {
     const categories = rootFolders.flatMap(folder => folder.children || []).filter(child => child.type === 'folder');
+    const totalDocs = allFiles.length;
+    const recent = (libraryStats && libraryStats.recent) || [];
+    const thin = (libraryStats && libraryStats.thin) || [];
+    const filled = totalDocs - thin.length;
+    const categoryOf = (path) => {
+      const parts = String(path || '').split(' / ');
+      return parts.length > 1 ? parts[1] : '—';
+    };
+    const shortDate = (iso) => {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return (d.getMonth() + 1) + '月' + d.getDate() + '日';
+    };
+    const continueFile = (recent[0] && allFiles.find(f => f.id === recent[0].id)) || allFiles.find(f => f.id === (recentDocs[0] && recentDocs[0].id)) || null;
+    const continueMeta = recent[0] ? (categoryOf(continueFile && continueFile.path) + ' · ' + recent[0].len + ' 字 · ' + shortDate(recent[0].updated_at) + ' 改过') : '';
+    const maxCount = Math.max(...categories.map(c => countDocs(c)), 1);
 
     return (
-      <div className="mx-auto max-w-[900px] px-8 py-14">
-        <h1 className="text-[30px] font-semibold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">硬件知识库</h1>
-        <p className="mt-2 text-[13.5px] text-zinc-500 dark:text-zinc-400">
-          {rootFolders.flatMap(folder => folder.children || []).filter(c => c.type === 'folder').length} 个分类 · {allFiles.length} 篇
-        </p>
+      <div className="mx-auto max-w-[1120px] px-8 py-10">
+        <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">硬件知识库</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-zinc-500 dark:text-zinc-400">
+          <span><b className="font-semibold text-zinc-700 dark:text-zinc-200">{categories.length}</b> 个分类</span>
+          <span><b className="font-semibold text-zinc-700 dark:text-zinc-200">{totalDocs}</b> 篇</span>
+          <span><b className="font-semibold text-zinc-700 dark:text-zinc-200">{filled}</b> 篇有内容</span>
+          {recent[0] && <span>最近更新 {shortDate(recent[0].updated_at)}</span>}
+        </div>
 
-        {recentDocs.length > 0 && (
-          <div className="mt-10">
-            <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-zinc-500 dark:text-zinc-400">
-              <Clock size={14} /> 最近打开
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {recentDocs.slice(0, 5).map(doc => (
-                <button key={doc.id} type="button" onClick={() => openFile(allFiles.find(f => f.id === doc.id) || doc)} className="rounded-md border border-zinc-200 px-3 py-1.5 text-[13px] text-zinc-700 transition hover:border-blue-300 hover:text-blue-700 dark:border-zinc-800 dark:text-zinc-300">
-                  {doc.name}
-                </button>
-              ))}
-            </div>
-          </div>
+        {continueFile && (
+          <button type="button" onClick={() => openFile(continueFile)} className="mt-6 flex w-full items-center gap-4 rounded-xl border border-blue-100 bg-gradient-to-r from-blue-50/70 to-white px-5 py-3.5 text-left transition hover:border-blue-300 dark:border-blue-900 dark:from-blue-950/40 dark:to-zinc-950">
+            <span className="flex-none text-[11.5px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">继续</span>
+            <span className="min-w-0">
+              <span className="block truncate text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">{continueFile.name}</span>
+              {continueMeta && <span className="mt-0.5 block text-[12px] text-zinc-500 dark:text-zinc-400">{continueMeta}</span>}
+            </span>
+            <span className="ml-auto flex-none text-[12.5px] text-blue-600 dark:text-blue-400">打开 ›</span>
+          </button>
         )}
 
-        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {categories.map(folder => (
-            <button
-              key={folder.id}
-              type="button"
-              onClick={() => openFolder(allFolders.find(item => item.id === folder.id) || folder)}
-              className="group rounded-xl border border-zinc-200 p-5 text-left transition hover:border-blue-300 hover:shadow-sm dark:border-zinc-800 dark:hover:border-blue-800"
-            >
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2 text-[15px] font-medium text-zinc-900 dark:text-zinc-100">
-                  <Folder size={16} className="text-blue-500" /> {folder.name}
-                </span>
-                <ChevronRight size={15} className="text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-blue-500" />
+        <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,500px)_minmax(0,1fr)]">
+          <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+            <div className="mb-1 flex items-center gap-2 text-[12.5px] text-zinc-500 dark:text-zinc-400">
+              <span>知识分布</span>
+              <span className="ml-auto text-[11.5px] text-zinc-400 dark:text-zinc-500">大圈 = 分类篇数，小点 = 子类</span>
+            </div>
+            {renderKnowledgeMap(categories)}
+          </div>
+
+          <div>
+            <div className="rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+              <div className="mb-1 flex items-center gap-2 text-[12.5px] text-zinc-500 dark:text-zinc-400">
+                <span>最近更新</span>
+                <span className="ml-auto text-[11.5px] text-zinc-400 dark:text-zinc-500">按正文改动时间</span>
               </div>
-              <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">
-                {(folder.children || []).filter(child => child.type === 'folder').length} 个子类 · {countDocs(folder)} 篇
-              </p>
-            </button>
-          ))}
+              <div className="flex flex-col">
+                {recent.length === 0 && <p className="py-4 text-[13px] text-zinc-400">还没有写过正文</p>}
+                {recent.map(item => {
+                  const file = allFiles.find(f => f.id === item.id);
+                  if (!file) return null;
+                  return (
+                    <button key={item.id} type="button" onClick={() => openFile(file)} className="flex items-center gap-3 border-b border-zinc-100 py-2 text-left last:border-0 dark:border-zinc-900">
+                      <span className="w-[52px] flex-none text-[11.5px] tabular-nums text-zinc-400 dark:text-zinc-500">{shortDate(item.updated_at)}</span>
+                      <span className="min-w-0 truncate text-[13.5px] text-zinc-800 hover:text-blue-600 dark:text-zinc-200">{item.name}</span>
+                      <span className="ml-auto flex-none rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">{categoryOf(file.path)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {thin.length > 0 && (
+              <div className="mt-4 rounded-xl border border-dashed border-zinc-200 px-4 py-3 dark:border-zinc-800">
+                <div className="mb-2 text-[12.5px] text-zinc-500 dark:text-zinc-400">{thin.length} 篇只有标题、正文待写</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {thin.map(item => {
+                    const file = allFiles.find(f => f.id === item.id);
+                    if (!file) return null;
+                    return (
+                      <button key={item.id} type="button" onClick={() => openFile(file)} className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[12px] text-amber-800 transition hover:border-amber-300 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">{item.name}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-8 flex items-baseline gap-2.5">
+          <h2 className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">分类</h2>
+          <em className="not-italic text-[12.5px] text-zinc-400 dark:text-zinc-500">点进去看子类和文章</em>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {categories.map(folder => {
+            const n = countDocs(folder);
+            const subs = (folder.children || []).filter(child => child.type === 'folder').map(child => child.name);
+            return (
+              <button key={folder.id} type="button" onClick={() => openFolder(allFolders.find(item => item.id === folder.id) || folder)} className="rounded-xl border border-zinc-200 px-4 py-3 text-left transition hover:border-blue-300 hover:shadow-sm dark:border-zinc-800 dark:hover:border-blue-800">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[14.5px] font-semibold text-zinc-900 dark:text-zinc-100">{folder.name}</span>
+                  <span className="ml-auto text-[12px] tabular-nums text-zinc-400 dark:text-zinc-500">{n}</span>
+                </div>
+                <div className="my-2 h-[3px] overflow-hidden rounded bg-zinc-100 dark:bg-zinc-800">
+                  <i className="block h-full rounded bg-blue-600 opacity-85" style={{ width: Math.round((n / maxCount) * 100) + '%' }} />
+                </div>
+                <div className="text-[11.5px] leading-relaxed text-zinc-500 dark:text-zinc-400">{subs.join(' · ') || '—'}</div>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
   };
-
   const renderFolderPage = () => {
     if (!activeFolder) return renderHomePage();
     const childFolders = (activeFolder.children || []).filter(child => child.type === 'folder');

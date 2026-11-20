@@ -170,3 +170,31 @@ export async function moveNode(id, newParentId) {
     return { success: false, error: error.message };
   }
 }
+
+// 9. 首页用的统计：最近更新的文章 + 只有标题还没写正文的文章
+export async function getLibraryStats() {
+  try {
+    const recent = await sql`
+      SELECT dir.id, dir.name, dir.parent_id, d.updated_at, length(d.content) AS len
+      FROM documents d
+      INNER JOIN directories dir ON dir.id = d.id
+      WHERE d.content IS NOT NULL AND length(d.content) >= 200
+      ORDER BY d.updated_at DESC NULLS LAST
+      LIMIT 8;
+    `;
+    const thin = await sql`
+      SELECT dir.id, dir.name, dir.parent_id, length(d.content) AS len
+      FROM directories dir
+      LEFT JOIN documents d ON d.id = dir.id
+      WHERE dir.type = 'file' AND coalesce(length(d.content), 0) < 50
+      ORDER BY dir.created_at ASC;
+    `;
+    return {
+      success: true,
+      recent: recent.rows.map((r) => ({ ...r, updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null })),
+      thin: thin.rows,
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
