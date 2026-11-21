@@ -57,6 +57,7 @@ export default function Home() {
   const [isEditing, setIsEditing] = useState(false);
   const [directories, setDirectories] = useState([]);
   const [libraryStats, setLibraryStats] = useState(null);
+
   const [markdownContent, setMarkdownContent] = useState("");
   const [activeTitle, setActiveTitle] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -78,6 +79,8 @@ export default function Home() {
   const [toast, setToast] = useState('');
   const [contentHits, setContentHits] = useState([]);
   const [navDrawer, setNavDrawer] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState(null);
+  const searchInputRef = useRef(null);
   
   const [theme, setTheme] = useState('light');
   const [recentDocs, setRecentDocs] = useState([]);
@@ -116,6 +119,11 @@ export default function Home() {
   };
 
   const allFiles = useMemo(() => flattenFiles(directories), [directories]);
+  // 正文双链候选：库内其他文章标题（≥3 字），长的优先匹配
+  const linkableDocs = useMemo(() => {
+    return allFiles.filter((f) => f.id !== activeFileId && f.name && f.name.length >= 3)
+      .sort((a, b) => b.name.length - a.name.length);
+  }, [allFiles, activeFileId]);
   const activeFile = allFiles.find(file => file.id === activeFileId);
   const siblingFiles = activeFile ? allFiles.filter(file => file.parentKey === activeFile.parentKey) : [];
   const activeSiblingIndex = siblingFiles.findIndex(file => file.id === activeFileId);
@@ -269,6 +277,21 @@ export default function Home() {
       window.removeEventListener('scroll', close, true);
     };
   }, [menuState]);
+
+  // Ctrl/Cmd+K 聚焦搜索；Esc 关图片灯箱
+  useEffect(() => {
+    const onKey = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      } else if (event.key === 'Escape') {
+        setLightboxSrc(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // 编辑中快捷键：Ctrl/Cmd+S 保存，Esc 退出（放在早返回之前，保证 hooks 顺序稳定）
   useEffect(() => {
@@ -846,6 +869,41 @@ export default function Home() {
       const id = headingIdByText[flattenText(children).trim()];
       return <h3 id={id} style={{ scrollMarginTop: 96 }}>{children}</h3>;
     },
+    img: ({ src, alt }) => (
+      <img src={src} alt={alt || ''} onClick={() => setLightboxSrc(src)} className="cursor-zoom-in" loading="lazy" />
+    ),
+    text: ({ children }) => <AutoLinkedText>{children}</AutoLinkedText>,
+  };
+
+  const linkifyText = (text) => {
+    if (!text || !linkableDocs.length) return text;
+    let nodes = [text];
+    for (const doc of linkableDocs) {
+      const next = [];
+      for (const node of nodes) {
+        if (typeof node !== 'string') { next.push(node); continue; }
+        let rest = node;
+        let idx;
+        while ((idx = rest.indexOf(doc.name)) !== -1) {
+          if (idx > 0) next.push(rest.slice(0, idx));
+          next.push(
+            <a key={doc.id + '-' + next.length} href={'#' + doc.id} title={'打开：' + doc.name}
+              onClick={(e) => { e.preventDefault(); const target = allFiles.find((f) => f.id === doc.id); if (target) openFile(target); }}
+              className="text-blue-600 underline decoration-blue-300 underline-offset-2 hover:decoration-blue-600 dark:text-blue-400">{doc.name}</a>
+          );
+          rest = rest.slice(idx + doc.name.length);
+        }
+        if (rest) next.push(rest);
+      }
+      nodes = next;
+    }
+    return nodes;
+  };
+
+  const AutoLinkedText = ({ children }) => {
+    const text = flattenText(children);
+    if (!text) return children;
+    return <>{linkifyText(text)}</>;
   };
 
   // ===== 左栏树操作：提示 / 就地重命名 / 删除 / 新建 / 拖拽 / 右键菜单 =====
@@ -1628,7 +1686,8 @@ export default function Home() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="搜索芯片、器件、协议…"
+            ref={searchInputRef}
+            placeholder="搜索芯片、器件、协议… (Ctrl+K)"
             className="w-full rounded-md border border-zinc-200 bg-transparent py-1.5 pl-8 pr-3 text-[13px] outline-none transition focus:border-blue-400 dark:border-zinc-800"
           />
         </div>
@@ -1693,6 +1752,13 @@ export default function Home() {
           {searchQuery.trim() ? renderSearchPage() : activeFileId ? renderArticlePage() : renderFolderPage()}
         </main>
       </div>
+
+      {lightboxSrc && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 cursor-zoom-out" onClick={() => setLightboxSrc(null)}>
+          <img src={lightboxSrc} alt="放大预览" className="max-h-full max-w-full rounded-lg object-contain shadow-2xl" />
+          <button className="absolute right-5 top-5 rounded-full bg-white/15 p-2 text-white hover:bg-white/25" aria-label="关闭"><X size={22} /></button>
+        </div>
+      )}
     </div>
   );
 }
