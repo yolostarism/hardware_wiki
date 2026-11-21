@@ -530,14 +530,14 @@ export default function Home() {
     </button>
   );
 
-  const renderArticleRow = (file) => (
+  const renderArticleRow = (file, subLabel) => (
     <div key={file.id} className="flex items-stretch hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
       <button type="button" onClick={() => openFile(file)} className="min-w-0 flex-1 flex items-center justify-between gap-3 px-4 py-3 text-left">
         <span className="flex items-center gap-3 min-w-0">
           <FileText size={16} className="text-gray-400 shrink-0" />
           <span className="min-w-0">
             <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{file.name}</span>
-            <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">{file.path || activeFolder?.path}</span>
+            {subLabel ? <span className="block text-xs text-gray-400 dark:text-gray-500 truncate">{subLabel}</span> : null}
           </span>
         </span>
         <ChevronRight size={16} className="text-gray-400 shrink-0" />
@@ -810,7 +810,7 @@ export default function Home() {
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">子目录文章</h3>
               </div>
               <div className="border border-gray-200 dark:border-zinc-800 rounded-lg divide-y divide-gray-200 dark:divide-zinc-800 overflow-hidden">
-                {descendantFiles.map(file => renderArticleRow(file))}
+                {descendantFiles.map(file => renderArticleRow(file, (file.path || '').split(' / ').slice(-2, -1)[0] || ''))}
               </div>
             </section>
           )}
@@ -1490,7 +1490,7 @@ export default function Home() {
           <section className="mt-8">
             <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">子目录文章</h2>
             <div className="divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-              {descendantFiles.map(file => renderArticleRow(file))}
+              {descendantFiles.map(file => renderArticleRow(file, (file.path || '').split(' / ').slice(-2, -1)[0] || ''))}
             </div>
           </section>
         )}
