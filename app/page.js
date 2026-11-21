@@ -1442,6 +1442,18 @@ export default function Home() {
       file.path.indexOf(activeFolder.path + ' / ') === 0 &&
       file.parentKey !== activeFolder.id
     );
+    // 按直接子目录分组：路径里 activeFolder 之后的第一段就是子目录名
+    const descendantGroups = (() => {
+      const prefix = activeFolder.path + ' / ';
+      const map = new Map();
+      for (const file of descendantFiles) {
+        const rest = (file.path || '').slice(prefix.length); // "子目录 / 文章名" 或更深
+        const group = rest.split(' / ')[0] || '其他';
+        if (!map.has(group)) map.set(group, []);
+        map.get(group).push(file);
+      }
+      return [...map.entries()];
+    })();
 
     return (
       <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-8 sm:py-12">
@@ -1486,11 +1498,21 @@ export default function Home() {
           )}
         </section>
 
-        {descendantFiles.length > 0 && (
+        {descendantGroups.length > 0 && (
           <section className="mt-8">
             <h2 className="mb-3 text-[13px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">子目录文章</h2>
-            <div className="divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-              {descendantFiles.map(file => renderArticleRow(file, (file.path || '').split(' / ').slice(-2, -1)[0] || ''))}
+            <div className="space-y-5">
+              {descendantGroups.map(([group, files]) => (
+                <div key={group}>
+                  <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-zinc-700 dark:text-zinc-300">
+                    <Folder size={13} className="text-zinc-400" />{group}
+                    <span className="text-[11px] font-normal text-zinc-400">{files.length}</span>
+                  </h3>
+                  <div className="divide-y divide-zinc-100 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+                    {files.map(file => renderArticleRow(file))}
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         )}
