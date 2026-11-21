@@ -13,6 +13,18 @@ if (neonProxyUrl) {
 
 const DENIED = { success: false, error: '没有编辑权限' };
 
+// 首页/目录是每次进页面必拉的读多写少数据，加 60 秒进程内缓存，任何写操作后立即失效
+const cache = globalThis.__pzpWikiCache || (globalThis.__pzpWikiCache = new Map());
+const TTL = 60_000;
+async function cached(key, fn) {
+  const hit = cache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.value;
+  const value = await fn();
+  cache.set(key, { value, expires: Date.now() + TTL });
+  return value;
+}
+function bustCache() { cache.clear(); }
+
 // 0. 登录：口令只跟数据库里的哈希比对，明文不进前端、不进代码
 export async function login(password) {
   try {
@@ -48,8 +60,10 @@ export async function getSessionRole() {
 // 1. 获取所有目录树（只读，公开）
 export async function getDirectories() {
   try {
-    const { rows } = await sql`SELECT * FROM directories ORDER BY created_at ASC;`;
-    return { success: true, data: rows };
+    return await cached('directories', async () => {
+      const { rows } = await sql`SELECT * FROM directories ORDER BY created_at ASC;`;
+      return { success: true, data: rows };
+    });
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -80,6 +94,7 @@ export async function addNode(id, name, type, parentId) {
         VALUES (${id}, '# 新文章\n在此输入内容...');
       `;
     }
+    bustCache();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -106,6 +121,7 @@ export async function deleteNode(id) {
       )
       DELETE FROM directories WHERE id IN (SELECT id FROM subtree);
     `;
+    bustCache();
     return { success: true, deleted: result.rowCount ?? 0 };
   } catch (error) {
     return { success: false, error: error.message };
@@ -143,6 +159,7 @@ export async function updateDocument(id, content) {
       ON CONFLICT (id) DO UPDATE
       SET content = EXCLUDED.content, updated_at = CURRENT_TIMESTAMP;
     `;
+    bustCache();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -154,6 +171,7 @@ export async function renameNode(id, newName) {
   try {
     if (!(await isOwner(sql))) return DENIED;
     await sql`UPDATE directories SET name = ${newName} WHERE id = ${id};`;
+    bustCache();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -165,6 +183,7 @@ export async function moveNode(id, newParentId) {
   try {
     if (!(await isOwner(sql))) return DENIED;
     await sql`UPDATE directories SET parent_id = ${newParentId} WHERE id = ${id};`;
+    bustCache();
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -174,6 +193,7 @@ export async function moveNode(id, newParentId) {
 // 9. 首页用的统计：最近更新的文章 + 只有标题还没写正文的文章
 export async function getLibraryStats() {
   try {
+    return await cached('libraryStats', async () => {
     const recent = await sql`
       SELECT dir.id, dir.name, dir.parent_id, d.updated_at, length(d.content) AS len
       FROM documents d
@@ -194,6 +214,7 @@ export async function getLibraryStats() {
       recent: recent.rows.map((r) => ({ ...r, updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null })),
       thin: thin.rows,
     };
+    });
   } catch (error) {
     return { success: false, error: error.message };
   }

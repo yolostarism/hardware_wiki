@@ -5,7 +5,7 @@ import { useState, useEffect,useMemo,useRef } from 'react';
 import { 
   Folder, FolderOpen, FileText, Search, PlusCircle, LogOut, 
   Edit2, Save, FilePlus, FolderPlus, MoveRight, Trash2, Pencil, GripVertical, MoreHorizontal,
-  Sun, Moon, Clock, Star, Home as HomeIcon, ChevronLeft, ChevronRight, MapPin
+  Sun, Moon, Clock, Star, Home as HomeIcon, ChevronLeft, ChevronRight, MapPin, Menu, X
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -77,6 +77,7 @@ export default function Home() {
   const [menuState, setMenuState] = useState(null);
   const [toast, setToast] = useState('');
   const [contentHits, setContentHits] = useState([]);
+  const [navDrawer, setNavDrawer] = useState(false);
   
   const [theme, setTheme] = useState('light');
   const [recentDocs, setRecentDocs] = useState([]);
@@ -364,6 +365,7 @@ export default function Home() {
 
   const openFile = async (file) => {
     if (!file) return;
+    setNavDrawer(false);
     setActiveFileId(file.id);
     setActiveFolderId(file.parentKey || file.parent_id || null);
     setSearchQuery('');
@@ -438,6 +440,7 @@ export default function Home() {
   };
 
   const openHome = () => {
+    setNavDrawer(false);
     setActiveFileId(null);
     setActiveFolderId(null);
     setSearchQuery('');
@@ -1255,12 +1258,16 @@ export default function Home() {
       const d = new Date(iso);
       return (d.getMonth() + 1) + '月' + d.getDate() + '日';
     };
-    const continueFile = (recent[0] && allFiles.find(f => f.id === recent[0].id)) || allFiles.find(f => f.id === (recentDocs[0] && recentDocs[0].id)) || null;
-    const continueMeta = recent[0] ? (categoryOf(continueFile && continueFile.path) + ' · ' + recent[0].len + ' 字 · ' + shortDate(recent[0].updated_at) + ' 改过') : '';
+    const continueFile = allFiles.find(f => f.id === (recentDocs[0] && recentDocs[0].id)) || (recent[0] && allFiles.find(f => f.id === recent[0].id)) || null;
+    const savedPos = (() => {
+      try { return JSON.parse(localStorage.getItem(READING_POSITIONS_KEY) || '{}'); } catch (e) { return {}; }
+    })();
+    const lastPos = continueFile ? (savedPos[continueFile.id] || 0) : 0;
+    const continueMeta = continueFile ? (categoryOf(continueFile.path) + (lastPos > 200 ? ' · 已读 ' + lastPos + 'px' : '')) : '';
     const maxCount = Math.max(...categories.map(c => countDocs(c)), 1);
 
     return (
-      <div className="mx-auto max-w-[1120px] px-8 py-10">
+      <div className="mx-auto max-w-[1120px] px-4 py-6 sm:px-8 sm:py-10">
         <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-zinc-900 dark:text-zinc-50">硬件知识库</h1>
         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-zinc-500 dark:text-zinc-400">
           <span><b className="font-semibold text-zinc-700 dark:text-zinc-200">{categories.length}</b> 个分类</span>
@@ -1278,6 +1285,23 @@ export default function Home() {
             </span>
             <span className="ml-auto flex-none text-[12.5px] text-blue-600 dark:text-blue-400">打开 ›</span>
           </button>
+        )}
+
+        {favoriteDocs.length > 0 && (
+          <div className="mt-4 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <div className="mb-2 flex items-center gap-2 text-[12.5px] text-zinc-500 dark:text-zinc-400"><Star size={13} className="text-amber-500" /><span>收藏</span></div>
+            <div className="flex flex-wrap gap-1.5">
+              {favoriteDocs.map(doc => {
+                const file = allFiles.find(f => f.id === doc.id);
+                if (!file) return null;
+                return (
+                  <button key={doc.id} type="button" onClick={() => openFile(file)} className="flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[12.5px] text-zinc-700 transition hover:border-amber-300 hover:text-amber-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-amber-800">
+                    <Star size={11} className="fill-amber-400 text-amber-400" />{file.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
 
         <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,500px)_minmax(0,1fr)]">
@@ -1362,7 +1386,7 @@ export default function Home() {
     );
 
     return (
-      <div className="mx-auto max-w-[900px] px-8 py-12">
+      <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-8 sm:py-12">
         <button type="button" onClick={goToParentFolder} className="mb-5 inline-flex items-center gap-1 text-[13px] text-zinc-500 hover:text-blue-600 dark:text-zinc-400">
           <ChevronLeft size={14} /> {activeFolderParent ? activeFolderParent.name : '学习首页'}
         </button>
@@ -1422,7 +1446,7 @@ export default function Home() {
     const matchedFiles = allFiles.filter(file => file.name.toLowerCase().includes(query) || file.path.toLowerCase().includes(query));
 
     return (
-      <div className="mx-auto max-w-[900px] px-8 py-12">
+      <div className="mx-auto max-w-[900px] px-4 py-6 sm:px-8 sm:py-12">
         <h1 className="text-[26px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">“{searchQuery}”</h1>
         <p className="mt-2 text-[13px] text-zinc-500 dark:text-zinc-400">找到 {matchedFolders.length} 个目录，{matchedFiles.length} 篇文章{contentHits.length > 0 ? '，另有 ' + contentHits.length + ' 篇正文命中' : ''}。</p>
 
@@ -1589,13 +1613,16 @@ export default function Home() {
         </div>
       )}
       {loginDialog}
-      <header className="z-30 flex h-14 shrink-0 items-center gap-4 border-b border-zinc-200 px-5 dark:border-zinc-800">
+      <header className="z-30 flex h-14 shrink-0 items-center gap-2 border-b border-zinc-200 px-3 sm:gap-4 sm:px-5 dark:border-zinc-800">
+        <button type="button" onClick={() => setNavDrawer(true)} title="目录" className="rounded-md p-1.5 text-zinc-600 hover:bg-zinc-100 md:hidden dark:text-zinc-300 dark:hover:bg-zinc-800">
+          <Menu size={18} />
+        </button>
         <button type="button" onClick={openHome} className="flex shrink-0 items-center gap-2">
           <span className="grid h-6 w-6 place-items-center rounded-md bg-blue-600 text-[12px] font-bold text-white">P</span>
-          <span className="text-[14.5px] font-semibold tracking-tight">PZP 硬件知识库</span>
+          <span className="hidden text-[14.5px] font-semibold tracking-tight sm:inline">PZP 硬件知识库</span>
         </button>
 
-        <div className="relative ml-2 w-full max-w-[260px]">
+        <div className="relative ml-1 w-full max-w-[260px] sm:ml-2">
           <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
             type="text"
@@ -1624,8 +1651,12 @@ export default function Home() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-[260px] shrink-0 flex-col overflow-hidden border-r border-zinc-200 md:flex dark:border-zinc-800">
+        {navDrawer && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setNavDrawer(false)} />}
+        <aside className={cx('fixed inset-y-0 left-0 z-50 flex w-[270px] shrink-0 flex-col overflow-hidden border-r border-zinc-200 bg-white transition-transform duration-200 md:static md:z-auto md:w-[260px] md:translate-x-0 md:bg-transparent dark:border-zinc-800 dark:bg-zinc-950 md:dark:bg-transparent', navDrawer ? 'translate-x-0' : '-translate-x-full')}>
           <div className="flex items-center justify-between px-3 pb-1 pt-3">
+            <button type="button" onClick={() => setNavDrawer(false)} title="关闭目录" className="mr-1 rounded p-1 text-zinc-400 hover:text-zinc-700 md:hidden dark:hover:text-zinc-200">
+              <X size={16} />
+            </button>
             <button type="button" onClick={openHome} className={cx('flex-1 rounded-md px-2 py-1.5 text-left text-[13.5px] transition', !activeFileId && !activeFolderId && !searchQuery.trim() ? 'bg-blue-50 font-medium text-blue-700 dark:bg-blue-500/10 dark:text-blue-300' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800/60')}>
               学习首页
             </button>
