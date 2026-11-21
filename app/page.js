@@ -531,7 +531,7 @@ export default function Home() {
   );
 
   const renderArticleRow = (file, subLabel) => (
-    <div key={file.id} className="flex items-stretch hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
+    <div key={file.id} className="group flex items-stretch hover:bg-gray-50 dark:hover:bg-zinc-900 transition">
       <button type="button" onClick={() => openFile(file)} className="min-w-0 flex-1 flex items-center justify-between gap-3 px-4 py-3 text-left">
         <span className="flex items-center gap-3 min-w-0">
           <FileText size={16} className="text-gray-400 shrink-0" />
@@ -545,11 +545,15 @@ export default function Home() {
       {isAdmin && (
         <button
           type="button"
-          onClick={() => startMovingFile(file)}
-          className={`w-24 border-l border-gray-200 dark:border-zinc-800 flex items-center justify-center gap-1 text-sm transition ${movingNode?.id === file.id ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300'}`}
-          title="移动到其他目录"
+          onClick={(event) => {
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            setMenuState({ id: file.id, node: file, x: Math.max(8, rect.right - 176), y: rect.bottom + 4 });
+          }}
+          className="flex w-10 shrink-0 items-center justify-center text-gray-400 opacity-0 transition hover:text-gray-700 group-hover:opacity-100 dark:hover:text-gray-200"
+          title="更多操作"
         >
-          <MoveRight size={15} /> 移动
+          <MoreHorizontal size={16} />
         </button>
       )}
     </div>
